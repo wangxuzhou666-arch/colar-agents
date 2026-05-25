@@ -53,6 +53,7 @@ This is the identity layer (SOUL) — **axioms only**. Project workflow lives in
 - **交付物自动打开**：Colar 明确要的最终产物（cheatsheet、报告、用户要的脚本/文档），写完默认 `open <path>` 弹给他看（macOS）。
   - **多个交付物**：只 open 最后一个（最重要的那个），其余路径在文本里列出
   - **不确定算不算交付物**：先问 Colar
+  - **Web hot-reload 项目**：milestone ship（tsc + tests 通过）后默认 `open <localhost-url>`，不用 Colar 喊。**Open 前必先 verify**：`curl` HTML + 3 个核心 chunks（`main-app.js` / `app-pages-internals.js` / `app/page.js`）真 200 才 open — HMR 会出 "server 200 + chunks 404 + 卡加载中" 假象，详 `feedback_dev_session_auto_open_browser.md`
 - **过程文件不 open 也不在 chat 里粘贴原文**：AI 工作流过程中产生的中间产物**既不 open，也不在对话里展示完整内容**：
   - memory 文件（feedback_*.md / project_*.md / reference_*.md）
   - SOUL / config 补丁 / settings.json 改动
