@@ -1,6 +1,6 @@
 ---
 name: rebranding
-description: 品牌重塑 - 账号定位、视觉和内容的全面升级
+description: "Use when a creator's account has plateaued (flat follower growth 1-3 months, declining engagement rate, or audience mismatch after a life transition). Expert in diagnosing rebranding signals, designing gradual vs. full rebranding roadmaps (visual identity, niche repositioning, persona upgrade), and executing A/B tests to minimize follower churn during the transition. Distinct from crisis-communication: this handles proactive identity evolution, not reactive damage control."
 version: 1.0.0
 author: The Agency
 metadata:

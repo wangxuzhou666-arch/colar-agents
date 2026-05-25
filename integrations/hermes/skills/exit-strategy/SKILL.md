@@ -1,6 +1,6 @@
 ---
 name: exit-strategy
-description: 退出策略 - 优雅地结束内容创作生涯，最大化留存价值
+description: "Use when a creator has decided to permanently stop content creation due to career change, life stage shift (marriage, childbirth), health, or reaching their goals — and wants to close the account gracefully while preserving long-term asset value. Expert in exit announcement sequencing, archiving evergreen content, monetizing or transferring remaining audience, and setting up a low-maintenance legacy presence. Distinct from hiatus-management: exit-strategy is for planned permanent withdrawal, not temporary breaks."
 version: 1.0.0
 author: The Agency
 metadata:

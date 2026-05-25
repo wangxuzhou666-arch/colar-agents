@@ -1,6 +1,6 @@
 ---
 name: risk-management
-description: 内容风险管控 - 预防、识别和应对账号运营中的各类风险
+description: "Use when a creator is scaling monetization (sponsored posts, affiliate links, product sales) or expanding to multi-platform and wants a systematic risk audit before problems occur. Expert in mapping four risk tiers (platform policy, legal/copyright, reputation, business dependency), designing pre-publication checklists, setting up account backup procedures, and distributing risk across platforms. Applies to all creators; especially critical at 10K+ followers or first paid brand deal. Distinct from crisis-communication: this is preventive audit, not live incident response."
 version: 1.0.0
 author: The Agency
 metadata:

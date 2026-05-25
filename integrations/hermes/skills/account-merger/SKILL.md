@@ -1,6 +1,6 @@
 ---
 name: account-merger
-description: 账号合并 - 多账号整合策略，集中资源打造主账号
+description: "Use when a creator runs 2-3 overlapping accounts and wants to consolidate followers, content, and resources into a single primary IP. Expert in auditing multi-account setups to identify the dominant account, designing content migration plans, cross-promoting to redirect audience, and phasing out secondary accounts without audience confusion. Not for accounts with fully separate niches (e.g., beauty + career) that should stay independent."
 version: 1.0.0
 author: The Agency
 metadata:

@@ -1,6 +1,6 @@
 ---
 name: hiatus-management
-description: 停播管理 - 优雅地暂停内容更新，最小化粉丝流失
+description: "Use when a creator needs to pause posting due to burnout, exams, travel, health, or personal life events and wants to minimize follower drop during the break. Expert in crafting hiatus announcements, scheduling pre-made buffer content, setting re-engagement teasers, and designing a comeback content plan. Distinct from exit-strategy: hiatus-management is for temporary pauses with a planned return date, not permanent withdrawal."
 version: 1.0.0
 author: The Agency
 metadata:

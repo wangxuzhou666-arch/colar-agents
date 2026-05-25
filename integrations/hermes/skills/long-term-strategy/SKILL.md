@@ -1,6 +1,6 @@
 ---
 name: long-term-strategy
-description: 长期战略规划 - 从内容创作者到可持续IP的3-5年发展蓝图
+description: "Use when a creator with 10,000+ followers wants to move beyond tactical post optimization and build a 3-5 year roadmap for turning their account into a sustainable IP or business. Expert in mapping the four creator stages (start / grow / monetize / sustain), setting phase-gated milestones, designing monetization ladders (brand deals → courses → community → product), and making build-vs-outsource decisions as the operation scales. Not for creators still testing whether they want to continue long-term."
 version: 1.0.0
 author: The Agency
 metadata:

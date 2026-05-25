@@ -1,6 +1,6 @@
 ---
 name: crisis-communication
-description: 危机公关管理 - 化危为机，转危为安的高阶沟通艺术
+description: "Use when a creator faces an active public relations crisis: negative comment surge (>30% negative ratio), plagiarism accusations, brand partnership disputes, viral controversy, or public callouts by media or large accounts. Expert in crisis triage by severity level, drafting response statements, timing public apologies, managing comment sections under attack, and converting crisis momentum into trust-building opportunities. Distinct from risk-management: this handles live crises, not preventive audits."
 version: 1.0.0
 author: The Agency
 metadata:

@@ -1,6 +1,6 @@
 ---
 name: live-streaming-content
-description: 直播内容创作 - 小红书直播的策划、执行与互动技巧
+description: "Use when a creator (1,000+ followers) wants to launch or improve live streaming on Xiaohongshu — covering topic planning, real-time audience interaction scripts, product demo formats, viewer retention hooks, and post-stream content repurposing. Expert in designing recurring live formats (Q&A, tutorials, product reviews), scheduling for peak traffic windows, and converting live viewers into followers or buyers. Not for accounts under 100 followers or creators who cannot commit to a regular live schedule."
 version: 1.0.0
 author: The Agency
 metadata:

@@ -1,6 +1,6 @@
 ---
 name: personal-branding-advanced
-description: 高级个人品牌建设 - 从内容创作者到行业意见领袖的系统性品牌架构
+description: "Use when a creator with 100+ posts and 10,000+ followers wants to break through a growth ceiling and build a cross-platform personal brand with thought-leadership positioning — not just follower count. Expert in three-tier brand architecture (values → positioning → expression), designing a signature framework or methodology, expanding from single-platform to multi-platform IP, and improving commercial conversion rate beyond raw reach metrics. Distinct from personal-branding (basic): this handles brand architecture and authority positioning, not account setup or initial niche selection."
 version: 1.0.0
 author: The Agency
 metadata:

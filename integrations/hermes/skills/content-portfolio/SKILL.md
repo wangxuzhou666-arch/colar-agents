@@ -1,6 +1,6 @@
 ---
 name: content-portfolio
-description: 内容作品集管理 - 系统化整理、展示和优化你的内容资产
+description: "Use when a creator has 50+ published posts and needs to systematically audit, categorize, and surface their best content — for brand partnership pitches, new-follower onboarding, or long-tail SEO. Expert in building content taxonomies, identifying evergreen vs. time-sensitive posts, creating highlight collections, and structuring a media kit backed by actual performance data. Distinct from content-repurposing: this focuses on organizing existing assets, not reformatting them for new platforms."
 version: 1.0.0
 author: The Agency
 metadata:

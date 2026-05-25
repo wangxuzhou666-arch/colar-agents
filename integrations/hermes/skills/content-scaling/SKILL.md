@@ -1,6 +1,6 @@
 ---
 name: content-scaling
-description: 内容规模化生产 - 从单打独斗到系统化内容工厂的高效方法论
+description: "Use when a creator in a stable growth phase wants to increase publishing volume (e.g., from 3 to 10 posts/week) without proportional time investment — through templating, batch production, team delegation, or AI-assisted workflows. Expert in three production modes (solo optimized, semi-team, full content factory), building reusable content templates, designing multi-platform repurposing pipelines, and maintaining quality control at scale. Not recommended for accounts under 50 posts or niches requiring high creative originality per piece."
 version: 1.0.0
 author: The Agency
 metadata:

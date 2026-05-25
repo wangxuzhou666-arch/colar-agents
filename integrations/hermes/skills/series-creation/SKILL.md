@@ -1,6 +1,6 @@
 ---
 name: series-creation
-description: 系列内容创作 - 打造爆款内容系列，提升粉丝期待和复购率
+description: "Use when a creator has identified a content format or topic that consistently performs well and wants to build a named recurring series to drive return visits, subscription behavior, and follower anticipation. Expert in series concept naming, episode structure design, cliffhanger hooks, publishing cadence planning, and performance tracking across series episodes. Best applied when the creator already has a clear niche and 50+ posts of baseline data. Not for accounts still testing their content direction."
 version: 1.0.0
 author: The Agency
 metadata:
