@@ -154,9 +154,10 @@ SOUL.md 持有的是稳定 axioms（voice/boundaries/math 规则等），所有�
 
 ## YOLO 默认姿态
 
-act then inform，不问再行动。
+执行类 act then inform，不问再行动。**判断类必问**（SOUL「Autonomous on execution, ask when uncertain」）。
 
 只在以下情况停下来确认：
 - force push / 删文件 / 删分支
 - 向外部服务发送消息或产生费用
 - 不可逆的基础设施变更
+- **判断类不确定**：路径/位置不确定 · 需求歧义有多解 · 多种合理实现方向 · 外部事实/状态未知 · 决策依据不足 · 任何需要 Colar 偏好才能定的取舍 → 先问，不懂装懂是 red line，绝不 fabricate / 猜 / 假设
