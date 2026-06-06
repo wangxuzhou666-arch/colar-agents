@@ -27,7 +27,13 @@ INDEXED_FILE=$(mktemp)
 trap 'rm -f "$ACTUAL_FILE" "$INDEXED_FILE"' EXIT
 
 ls feedback_*.md project_*.md user_*.md reference_*.md 2>/dev/null | sort > "$ACTUAL_FILE"
-grep -oE '(feedback|project|user|reference)_[a-z_0-9]+\.md' MEMORY.md | sort -u > "$INDEXED_FILE"
+# Tiered index: MEMORY.md 是热索引, 冷条目下沉到 *-index.md 子索引(reference-index.md 等)。
+# 三者一起算 "indexed", 否则外移到子索引的文件会被误报 unindexed。
+INDEX_FILES="MEMORY.md"
+for sub in *-index.md transcripts/INDEX.md; do
+    [ -f "$sub" ] && INDEX_FILES="$INDEX_FILES $sub"
+done
+grep -hoE '(feedback|project|user|reference)_[a-z_0-9]+\.md' $INDEX_FILES 2>/dev/null | sort -u > "$INDEXED_FILE"
 
 UNINDEXED=$(comm -23 "$ACTUAL_FILE" "$INDEXED_FILE")
 DEAD=$(comm -13 "$ACTUAL_FILE" "$INDEXED_FILE")
