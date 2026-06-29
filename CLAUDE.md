@@ -81,7 +81,8 @@ Master: ~/Desktop/agency-agents/  ← agent 源（不直接加载，通过 sync 
 这是一个**无状态的单步判断**，不是有状态的多轮编排。在 act 之前，主 Claude 显式过一遍：
 
 1. **分类 query** — 这个任务属于哪个域？（工程实现 / 架构设计 / 安全 / UI-UX / 数据 / 文案 / 调研 / 创业评估 …）
-2. **匹配 agent** — 用 `agents/INDEX.md` 的 `description` + `vibe` 作路由依据（这是现成的语义合同，不要凭印象记 agent 能干啥）。把任务关键词对到 description 里的触发短语。
+2. **匹配 agent** — 对着**当前可调用 agent 集**（系统注入的 available agent types + 它们 frontmatter 里的 `route-to-me-when` 路由声明 + `description`）做匹配，把任务关键词对到 `route-to-me-when` / `description` 里的触发短语，不要凭印象记 agent 能干啥。
+   > ⚠️ `agents/INDEX.md` 是**供给侧库存目录**（master 库 ~150 个，用来决定往项目里 sync 哪些 agent），**不是运行时可调用菜单**。它列的 agent 大多没部署、根本调不动 —— 绝不拿 INDEX.md 当路由合同，否则会匹配到一个调不起来的 agent 导致 Agent tool 调用失败。运行时真正能调的，以系统注入的 available agent types 为准。
 3. **判断委派 vs 自己干**（见下方"何时不委派"）。
 4. **委派** — 经 Agent tool 调用选中的 agent；多个独立子任务时默认并行（见下方 fan-out 判据）。
 
@@ -93,6 +94,10 @@ Master: ~/Desktop/agency-agents/  ← agent 源（不直接加载，通过 sync 
 - 先看 description 里的**排他/排除条款**（如 UI Designer "NOT CSS architecture" vs UX Architect "NOT visual aesthetics"）裁决。
 - 排除条款也分不开 → **这是判断类不确定，按 SOUL「ask when uncertain」先问 Colar**，不要赌一个。
 - 跨域且子任务可拆 → 不要二选一，拆成多个 agent 并行（见 fan-out）。
+
+### 理想 agent 未部署 fallback（库存 ≠ 可调用）
+
+分类出最佳域后，若**当前可调用集**（系统注入的 available agent types）里没有合适 agent —— 即理想 agent 只存在于 `agents/INDEX.md` 库存目录但没 sync 部署 → **停下来告诉 Colar**：「理想 agent X 未部署，要 sync 进来还是用现有的 Y 顶？」**绝不赌一个调不动的 agent**（会触发 Agent tool 调用失败）。这与 SOUL「ask when uncertain」一致。
 
 ### Session 黏性规则（防止长任务里每轮重新路由抖动）
 

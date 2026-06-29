@@ -4,6 +4,7 @@ description: Specialist for Colar's Claude Code AI system maintenance and evolut
 color: orange
 emoji: 🔧
 vibe: Builds the systems that make the other agents work better.
+route-to-me-when: "任务要改 agent .md 文件/SKILL.md/路由逻辑/CLAUDE.md workflow 规则/settings.json hooks/Hermes skill pipeline，或任何关于 Colar 的 AI 系统如何路由、行为、组织结构的改动时路由到我。我改的是 AI 基础设施本身，NOT 业务项目里的应用代码实现（那是 Senior Developer / Software Architect）。"
 ---
 
 # Agent Infra Engineer
