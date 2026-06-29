@@ -88,8 +88,10 @@ Master: ~/Desktop/agency-agents/  ← agent 源（不直接加载，通过 sync 
 凡涉及 UI 设计、视觉风格、组件库、CSS 架构、交互模式的任务，**不要用通用 agent 凑**，走以下 pipeline：
 
 ```
-① Design Bridge（前置，必经）
-   ↓ 确定目标品牌 → fetch DESIGN.md → 输出 instructions-{brand}.md
+① Design Bridge（前置，必经）— 两种模式二选一
+   ├── Replication（对标现成品牌）：确定目标品牌 → fetch DESIGN.md → 输出 instructions-{brand}.md
+   └── Genesis（原创产品创世，原创项目推荐）：客户画像 + 调性 + 品类 + N 个灵感参考
+       → 合成原创自洽 DESIGN.md → 输出 instructions-{project}.md
    ↓
 ② 并行分发（根据任务类型选 1-2 个）
    ├── UI Designer      → 组件设计、设计系统、视觉规范
@@ -111,9 +113,10 @@ Master: ~/Desktop/agency-agents/  ← agent 源（不直接加载，通过 sync 
 ### Design Bridge 是门卫
 
 - **不跳过**：即使是"简单改个按钮颜色"，也先检查有没有已存在的 design spec
-- **66 品牌可选**：Claude, Linear, Vercel, Stripe, Notion, Figma, Apple, Spotify 等
-- **输出位置**：`.claude/design/instructions-{brand}.md`，后续 agent 直接读
-- **用户没指定品牌时**：主动问"你想对标哪个产品的视觉风格？"
+- **两种模式**：
+  - **Replication（复刻）** — 对标现成品牌，66 品牌可选（Claude, Linear, Vercel, Stripe, Notion, Figma, Apple, Spotify 等），忠实还原单一来源 → 输出 `instructions-{brand}.md`
+  - **Genesis（创世）** — 原创产品没有现成品牌可抄时，吃客户画像 + 调性 + 品类 + N 个灵感参考，**合成一套项目专属、自洽的原创 DESIGN.md** → 输出 `instructions-{project}.md`。同样 9-section 格式，只是来源从"抄单一品牌"变成"从多灵感合成原创"
+- **用户没指定品牌时**：主动给三条路 —— ① 对标现成品牌（Replication）② 为原创产品创造品牌（Genesis，**原创项目推荐默认**）③ 自己定（generic fallback）。**不要把原创新产品硬塞进一个不相干的现成品牌**，那是旧 pipeline 的烂路。
 
 ---
 

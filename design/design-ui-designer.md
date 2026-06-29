@@ -23,9 +23,13 @@ Before starting ANY visual design work, check if a DESIGN.md spec exists for the
    - Read it and use those values as your design tokens
    - Do not override with your own defaults
 
-3. **If no brand reference exists**:
-   - Ask the user: "你想对标哪个产品的视觉风格？我可以从 66 个品牌设计系统中选一个作为基础（如 Linear、Vercel、Stripe、Notion 等），或者你也可以描述你想要的氛围。"
-   - Only fall back to generic design tokens if the user explicitly says "自己定"
+3. **If no brand reference exists** — offer three paths, and **recommend Genesis for original products**:
+   - Ask the user: "这个产品有现成可对标的视觉风格吗？三种走法：
+     ① **对标现成品牌**（Replication）— 从 66 个品牌设计系统里选一个忠实复刻（如 Linear、Vercel、Stripe、Notion）。适合想要某个成名产品同款质感。
+     ② **为新产品创造原创品牌**（Genesis，**原创产品推荐**）— 你给客户画像 + 调性关键词 + 品类 + 几个灵感参考，Design Bridge 合成一套这个项目专属、自洽的原创 DESIGN.md。适合没有现成品牌、又不想套用不相干大厂风的原创项目。
+     ③ **自己定** — 用通用设计 token 起步。"
+   - **Default recommendation for original products**: if this is a new/original product with no natural brand to copy (most of Colar's projects), steer toward **Genesis** rather than forcing an unrelated existing brand. Invoke **Design Bridge in Genesis mode**, which outputs `.claude/design/instructions-{project}.md`.
+   - Only fall back to generic design tokens if the user explicitly picks ③ / says "自己定"
 
 **Available brands** (via VoltAgent/awesome-design-md):
 AI: Claude, Cohere, Mistral AI, xAI | DevTools: Cursor, Vercel, Raycast, Warp | SaaS: Linear, Notion, Cal.com | Fintech: Stripe, Coinbase | Design: Figma, Framer | Consumer: Apple, Spotify, Nike | +50 more
