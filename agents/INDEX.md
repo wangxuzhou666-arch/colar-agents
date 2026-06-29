@@ -14,6 +14,7 @@
 
 | Agent | Specialty | When to Use |
 |-------|-----------|-------------|
+| 🔧 [Agent Infra Engineer](../engineering/engineering-agent-infra.md) | Specialist for Colar's Claude Code AI system maintenance and evolution. Use when modifyin… | Builds the systems that make the other agents work better. |
 | 📡 [Agent Observability Architect](../engineering/engineering-agent-observability-architect.md) | Expert in agent execution tracing, event schema design, OpenTelemetry for AI agents, and… | Turns raw agent traces into structured, evaluable event streams — the plumbing between ex… |
 | 🧬 [AI Data Remediation Engineer](../engineering/engineering-ai-data-remediation-engineer.md) | Specialist in self-healing data pipelines — uses air-gapped local SLMs and semantic clust… | Fixes your broken data with surgical AI precision — no rows left behind. |
 | 🤖 [AI Engineer](../engineering/engineering-ai-engineer.md) | Expert AI/ML engineer specializing in machine learning model development, deployment, and… | Turns ML models into production features that actually scale. |
@@ -25,13 +26,13 @@
 | ⚙️ [DevOps Automator](../engineering/engineering-devops-automator.md) | Expert DevOps engineer specializing in infrastructure automation, CI/CD pipeline developm… | Automates infrastructure so your team ships faster and sleeps better. |
 | 🔩 [Embedded Firmware Engineer](../engineering/engineering-embedded-firmware-engineer.md) | Specialist in bare-metal and RTOS firmware - ESP32/ESP-IDF, PlatformIO, Arduino, ARM Cort… | Writes production-grade firmware for hardware that can't afford to crash. |
 | 🔗 [Feishu Integration Developer](../engineering/engineering-feishu-integration-developer.md) | Full-stack integration expert specializing in the Feishu (Lark) Open Platform — proficien… | Builds enterprise integrations on the Feishu (Lark) platform — bots, approvals, data sync… |
-| 🖥️ [Frontend Developer](../engineering/engineering-frontend-developer.md) | Expert frontend developer specializing in modern web technologies, React/Vue/Angular fram… | Builds responsive, accessible web apps with pixel-perfect precision. |
+| 🖥️ [Frontend Developer](../engineering/engineering-frontend-developer.md) | Frontend specialist for React/Next.js UI components, client-side performance, and browser… | Builds responsive, accessible web apps with pixel-perfect precision. |
 | 🌿 [Git Workflow Master](../engineering/engineering-git-workflow-master.md) | Expert in Git workflows, branching strategies, and version control best practices includi… | Clean history, atomic commits, and branches that tell a story. |
 | 🚨 [Incident Response Commander](../engineering/engineering-incident-response-commander.md) | Expert incident commander specializing in production incident management, structured resp… | Turns production chaos into structured resolution. |
 | 📲 [Mobile App Builder](../engineering/engineering-mobile-app-builder.md) | Specialized mobile application developer with expertise in native iOS/Android development… | Ships native-quality apps on iOS and Android, fast. |
 | ⚡ [Rapid Prototyper](../engineering/engineering-rapid-prototyper.md) | Specialized in ultra-fast proof-of-concept development and MVP creation using efficient t… | Turns an idea into a working prototype before the meeting's over. |
 | 🔒 [Security Engineer](../engineering/engineering-security-engineer.md) | Expert application security engineer specializing in threat modeling, vulnerability asses… | Models threats, reviews code, and designs security architecture that actually holds. |
-| 💎 [Senior Developer](../engineering/engineering-senior-developer.md) | Premium implementation specialist - Masters Laravel/Livewire/FluxUI, advanced CSS, Three.… | Premium full-stack craftsperson — Laravel, Livewire, Three.js, advanced CSS. |
+| 💎 [Senior Developer](../engineering/engineering-senior-developer.md) | Full-stack implementation specialist for Next.js/React/TypeScript/Tailwind projects. Hand… | Senior full-stack craftsperson — Next.js, React, TypeScript, Python. |
 | 🏛️ [Software Architect](../engineering/engineering-software-architect.md) | Expert software architect specializing in system design, domain-driven design, architectu… | Designs systems that survive the team that built them. Every decision has a trade-off — n… |
 | ⛓️ [Solidity Smart Contract Engineer](../engineering/engineering-solidity-smart-contract-engineer.md) | Expert Solidity developer specializing in EVM smart contract architecture, gas optimizati… | Battle-hardened Solidity developer who lives and breathes the EVM. |
 | 🛡️ [SRE (Site Reliability Engineer)](../engineering/engineering-sre.md) | Expert site reliability engineer specializing in SLOs, error budgets, observability, chao… | Reliability is a feature. Error budgets fund velocity — spend them wisely. |
@@ -44,11 +45,11 @@
 | Agent | Specialty | When to Use |
 |-------|-----------|-------------|
 | 🎨 [Brand Guardian](../design/design-brand-guardian.md) | Expert brand strategist and guardian specializing in brand identity development, consiste… | Your brand's fiercest protector and most passionate advocate. |
-| \U0001F308 [Design Bridge](../design/design-bridge.md) | DESIGN.md translator — fetches brand design systems from VoltAgent/awesome-design-md (66… | Translates any brand's design DNA into pixel-perfect implementation specs. |
+| \U0001F308 [Design Bridge](../design/design-bridge.md) | DESIGN.md translator with two modes — REPLICATION: fetches an existing brand's design sys… | Translates any brand's design DNA into pixel-perfect implementation specs. |
 | 📷 [Image Prompt Engineer](../design/design-image-prompt-engineer.md) | Expert photography prompt engineer specializing in crafting detailed, evocative prompts f… | Translates visual concepts into precise prompts that produce stunning AI photography. |
 | 🌈 [Inclusive Visuals Specialist](../design/design-inclusive-visuals-specialist.md) | Representation expert who defeats systemic AI biases to generate culturally accurate, aff… | Defeats systemic AI biases to generate culturally accurate, affirming imagery. |
-| 🎨 [UI Designer](../design/design-ui-designer.md) | Expert UI designer specializing in visual design systems, component libraries, and pixel-… | Creates beautiful, consistent, accessible interfaces that feel just right. |
-| 📐 [UX Architect](../design/design-ux-architect.md) | Technical architecture and UX specialist who provides developers with solid foundations,… | Gives developers solid foundations, CSS systems, and clear implementation paths. |
+| 🎨 [UI Designer](../design/design-ui-designer.md) | Expert UI designer specializing in visual appearance, component aesthetics, color systems… | Creates beautiful, consistent, accessible interfaces that feel just right. |
+| 📐 [UX Architect](../design/design-ux-architect.md) | Technical architecture and UX specialist who provides structural foundations: CSS token s… | Gives developers solid foundations, CSS systems, and clear implementation paths. |
 | 🔬 [UX Researcher](../design/design-ux-researcher.md) | Expert user experience researcher specializing in user behavior analysis, usability testi… | Validates design decisions with real user data, not assumptions. |
 | 🎬 [Visual Storyteller](../design/design-visual-storyteller.md) | Expert visual communication specialist focused on creating compelling visual narratives,… | Transforms complex information into visual narratives that move people. |
 | ✨ [Whimsy Injector](../design/design-whimsy-injector.md) | Expert creative specialist focused on adding personality, delight, and playful elements t… | Adds the unexpected moments of delight that make brands unforgettable. |
@@ -176,6 +177,7 @@
 | 💸 [Accounts Payable Agent](../specialized/accounts-payable-agent.md) | Autonomous payment processing specialist that executes vendor payments, contractor invoic… | Moves money across any rail — crypto, fiat, stablecoins — so you don't have to. |
 | 🔐 [Agentic Identity & Trust Architect](../specialized/agentic-identity-trust.md) | Designs identity, authentication, and trust verification systems for autonomous AI agents… | Ensures every AI agent can prove who it is, what it's allowed to do, and what it actually… |
 | 🎛️ [Agents Orchestrator](../specialized/agents-orchestrator.md) | Autonomous pipeline manager that orchestrates the entire development workflow. You are th… | The conductor who runs the entire dev pipeline from spec to ship. |
+| 🤖 [ATS Reality Check](../specialized/ats-reality-check.md) | Simulates real ATS parser behavior (Greenhouse / Lever / Workday / Taleo / iCIMS) on a re… | Reads your resume the way Workday does — top-to-bottom, left-to-right, eating sidebars wh… |
 | ⚙️ [Automation Governance Architect](../specialized/automation-governance-architect.md) | Governance-first architect for business automations (n8n-first) who audits value, risk, a… | Calm, skeptical, and operations-focused. Prefer reliable systems over automation hype. |
 | 🛡️ [Blockchain Security Auditor](../specialized/blockchain-security-auditor.md) | Expert smart contract security auditor specializing in vulnerability detection, formal ve… | Finds the exploit in your smart contract before the attacker does. |
 | 📋 [Compliance Auditor](../specialized/compliance-auditor.md) | Expert technical compliance auditor specializing in SOC 2, ISO 27001, HIPAA, and PCI-DSS… | Walks you from readiness assessment through evidence collection to SOC 2 certification. |
@@ -187,6 +189,7 @@
 | 🕸️ [Identity Graph Operator](../specialized/identity-graph-operator.md) | Operates a shared identity graph that multiple AI agents resolve against. Ensures every a… | Ensures every agent in a multi-agent system gets the same canonical answer for "who is th… |
 | 🎯 [Interview Prep Coach](../specialized/interview-prep-coach.md) | 通用面试教练 — PM case / 技术 / behavioral 三模式路由，5-lens Challenge Protocol 反 yes-man，中美双轨场景适配，Byt… | 不说"great answer"，直接指出 metric 没接到 business outcome 的漏洞。 |
 | 🔎 [LSP/Index Engineer](../specialized/lsp-index-engineer.md) | Language Server Protocol specialist building unified code intelligence systems through LS… | Builds unified code intelligence through LSP orchestration and semantic indexing. |
+| 🎯 [Recruiter Critic](../specialized/recruiter-critic.md) | First-hand recruiter perspective on resume content — 6-second scan + BS detector + ChatGP… | Reads your resume the way a tired Friday-afternoon recruiter actually reads it. |
 | 🎯 [Recruitment Specialist](../specialized/recruitment-specialist.md) | Expert recruitment operations and talent acquisition specialist — skilled in China's majo… | Builds your full-cycle recruiting engine across China's hiring platforms, from sourcing t… |
 | 📤 [Report Distribution Agent](../specialized/report-distribution-agent.md) | AI agent that automates distribution of consolidated sales reports to representatives bas… | Automates delivery of consolidated sales reports to the right reps. |
 | 📊 [Sales Data Extraction Agent](../specialized/sales-data-extraction-agent.md) | AI agent specialized in monitoring Excel files and extracting key sales metrics (MTD, YTD… | Watches your Excel files and extracts the metrics that matter. |
@@ -224,4 +227,4 @@
 
 ---
 
-_Total: 147 agents across 13 divisions. Generated from filesystem — single source of truth is the .md files themselves._
+_Total: 150 agents across 13 divisions. Generated from filesystem — single source of truth is the .md files themselves._

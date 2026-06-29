@@ -20,7 +20,7 @@ act → /diff → commit
 
 ```
 ① 加载上下文（读相关文件，识别依赖）
-② 选 agents（根据任务域选 1-3 个专项 agent）
+② classify → delegate（过路由协议分类任务，选 1-3 个专项 agent；独立子任务默认 fan-out 并行）
 ③ 输出方案（架构决策 + 影响范围 + 风险点）
 ④ YOLO 执行（act then inform，不中途停下来问）
 ⑤ /diff（在 build 之前看，提前发现方向偏差）
@@ -38,7 +38,7 @@ act → /diff → commit
 
 ```
 ① 加载 memory + 上下文（读 MEMORY.md + README + git log）
-② 选 agents（Workflow Architect + 相关专项，最多 5 个）
+② classify → delegate（过路由协议；Workflow Architect 编排 + 相关专项，并行 fan-out 上限 5 个）
 ③ EnterPlanMode → 完整方案（含数据流/接口/风险/被排除方案）
 ④ 确认方案后 ExitPlanMode，开始执行
 ⑤ 每个子模块完成 → /diff → 小步 commit
@@ -70,7 +70,81 @@ Master: ~/Desktop/agency-agents/  ← agent 源（不直接加载，通过 sync 
 
 **不要手动往 `~/.claude/agents/` 或 `.claude/agents/` 放文件**——用 sync 脚本管理，保持单一真相源。
 
+---
+
+## Agent 路由协议（classify → delegate，取代"人肉手动选"）
+
+主 Claude 是 **orchestrator（委派模型，非接管模型）**：分类任务 → 选 agent → 经 Agent tool 委派 → **委派后保持控制权**，subagent 跑完把结果交回主 Claude，主 Claude 决定下一步。绝不让某个 specialist "接管"对话后主 Claude 退出（OpenAI 式 takeover handoff ❌）。
+
+### 每个任务开头先跑一个轻量分类步（router，不是重型编排）
+
+这是一个**无状态的单步判断**，不是有状态的多轮编排。在 act 之前，主 Claude 显式过一遍：
+
+1. **分类 query** — 这个任务属于哪个域？（工程实现 / 架构设计 / 安全 / UI-UX / 数据 / 文案 / 调研 / 创业评估 …）
+2. **匹配 agent** — 用 `agents/INDEX.md` 的 `description` + `vibe` 作路由依据（这是现成的语义合同，不要凭印象记 agent 能干啥）。把任务关键词对到 description 里的触发短语。
+3. **判断委派 vs 自己干**（见下方"何时不委派"）。
+4. **委派** — 经 Agent tool 调用选中的 agent；多个独立子任务时默认并行（见下方 fan-out 判据）。
+
+> ⚠️ router ≠ supervisor。这里只做"分类 → 选 → 委派"一次性决策，不引入持久编排状态机。需要跨多步协调时，那是 Tier 3 的 Workflow Architect 的活，不是 router 的活。
+
+### 路由歧义裁决（两个 agent 都像）
+
+分类时若有 ≥2 个 agent 的 description 都匹配且置信度接近 → 路由歧义。处理：
+- 先看 description 里的**排他/排除条款**（如 UI Designer "NOT CSS architecture" vs UX Architect "NOT visual aesthetics"）裁决。
+- 排除条款也分不开 → **这是判断类不确定，按 SOUL「ask when uncertain」先问 Colar**，不要赌一个。
+- 跨域且子任务可拆 → 不要二选一，拆成多个 agent 并行（见 fan-out）。
+
+### Session 黏性规则（防止长任务里每轮重新路由抖动）
+
+**默认黏住当前 agent，不每轮重新分类。** 重新跑 router 只在以下触发点：
+
+| 场景 | 动作 |
+|------|------|
+| 同一连续子任务的后续轮次（追问、迭代、修 bug） | **黏住** 当前 agent，不重路由 |
+| 任务域明显切换（写完代码 → 要做 UI / 要做安全审计） | **重路由** |
+| 当前 agent 连续 2 轮没产出有效进展 / 明显不匹配 | **重路由**（承认选错，换人） |
+| 用户显式点名换 agent / 换方向 | **重路由** |
+
+> Why：每轮重新选 agent 在长 session 会反复横跳（研究里的 session-aware routing caveat）。切换有成本（丢上下文、重新热身），所以**切换要有明确理由**，默认惯性黏住。
+
+### 何时不委派（router 判断"自己干"）
+
+- Tier 1 Micro（单文件/单函数、机械改动）→ 主 Claude 直接干，**不委派**，委派开销 > 收益。
+- 纯读取/答疑/一句话结论 → 直接答。
+- 需要广度搜索但只要结论 → 用 Explore agent，别自己堆 grep。
+
+---
+
+## 默认 Fan-out 编排姿态
+
+**可并行的独立子任务 = 默认并行 spin up 多个 subagent，不要默认串行。** 对标 Anthropic 生产多 agent 系统的默认姿态。
+
+### Fan-out 判据（满足全部才并行）
+
+1. 子任务之间**无数据依赖**（B 不需要 A 的输出当输入）。
+2. 子任务**域不同或可独立验证**（如：前端组件 ‖ 后端 API ‖ 安全审计）。
+3. 任务规模 ≥ Tier 2（值得委派开销）。
+
+满足 → **同一条消息里发多个 Agent tool 调用**（并行），不要一个跑完再发下一个。
+
+### 何时单 agent / 串行（不要无脑并行）
+
+- 子任务**有依赖链**（架构定了才能实现，实现完才能 review）→ 串行。
+- Tier 1 简单任务 → 单 agent 甚至主 Claude 自己干，并行是浪费。
+- 同一文件多处改动 → 单 agent（并行会写冲突）。
+- 拿不准能不能拆 → 默认单 agent 串行更安全，别为并行而并行。
+
+### 上限与一致性
+
+- 并行 fan-out **最多 5 个**（和 Tier 3「最多 5 个 agent」对齐），常规 ≤3。
+- fan-out 出去的 subagent 各自跑完**结果都交回主 Claude 合成**（delegation 不是放养）——主 Claude 负责把并行结果拼成一致输出。
+- 异质审查场景（需要多视角对抗审一个方案）→ 用 `/expert-panel` workflow，它已封装"并发 fan-out + 证据门控 + 对抗合成"，不要手搓。
+
+---
+
 ## Agent 选择原则
+
+> 先过上方**路由协议**（classify → delegate）。下表是常见任务类型的快速锚点，不替代分类步。
 
 | 任务类型 | 怎么选 |
 |---------|--------|
@@ -79,7 +153,7 @@ Master: ~/Desktop/agency-agents/  ← agent 源（不直接加载，通过 sync 
 | 方案设计 / 架构 | Workflow Architect（Tier 1 自带） |
 | **UI/UX 设计** | **走下方 UI/UX Pipeline（必经 Design Bridge）** |
 | 专项领域 | 项目的 `.claude/agents/` 里已部署的专项 agent |
-| 多领域交叉 | 最多选 3 个并行跑，不要超过 5 个 |
+| 多领域交叉 | 按 **默认 Fan-out 判据** 并行，常规 ≤3、上限 5 |
 
 ---
 
