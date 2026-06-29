@@ -91,7 +91,7 @@ Master: ~/Desktop/agency-agents/  ← agent 源（不直接加载，通过 sync 
 ① Design Bridge（前置，必经）— 两种模式二选一
    ├── Replication（对标现成品牌）：确定目标品牌 → fetch DESIGN.md → 输出 instructions-{brand}.md
    └── Genesis（原创产品创世，原创项目推荐）：客户画像 + 调性 + 品类 + N 个灵感参考
-       → 合成原创自洽 DESIGN.md → 输出 instructions-{project}.md
+       → 合成原创自洽 DESIGN.md → 输出 instructions-genesis-{project}.md
    ↓
 ② 并行分发（根据任务类型选 1-2 个）
    ├── UI Designer      → 组件设计、设计系统、视觉规范
@@ -115,7 +115,7 @@ Master: ~/Desktop/agency-agents/  ← agent 源（不直接加载，通过 sync 
 - **不跳过**：即使是"简单改个按钮颜色"，也先检查有没有已存在的 design spec
 - **两种模式**：
   - **Replication（复刻）** — 对标现成品牌，66 品牌可选（Claude, Linear, Vercel, Stripe, Notion, Figma, Apple, Spotify 等），忠实还原单一来源 → 输出 `instructions-{brand}.md`
-  - **Genesis（创世）** — 原创产品没有现成品牌可抄时，吃客户画像 + 调性 + 品类 + N 个灵感参考，**合成一套项目专属、自洽的原创 DESIGN.md** → 输出 `instructions-{project}.md`。同样 9-section 格式，只是来源从"抄单一品牌"变成"从多灵感合成原创"
+  - **Genesis（创世）** — 原创产品没有现成品牌可抄时，吃客户画像 + 调性 + 品类 + N 个灵感参考，**合成一套项目专属、自洽的原创 DESIGN.md** → 输出 `instructions-genesis-{project}.md`（保留 `instructions-` 前缀让 consumer 的 glob 仍命中，加 `genesis-` 区分原创 vs 复刻）。同样 9-section 格式，只是来源从"抄单一品牌"变成"从多灵感合成原创"
 - **用户没指定品牌时**：主动给三条路 —— ① 对标现成品牌（Replication）② 为原创产品创造品牌（Genesis，**原创项目推荐默认**）③ 自己定（generic fallback）。**不要把原创新产品硬塞进一个不相干的现成品牌**，那是旧 pipeline 的烂路。
 
 ---

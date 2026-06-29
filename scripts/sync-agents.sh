@@ -13,7 +13,23 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MASTER_LIB="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 PROJECT="${1:-.}"
+# Canonicalize so "." / relative / trailing-slash all resolve before the $HOME test
+PROJECT="$(cd "$PROJECT" 2>/dev/null && pwd || echo "$PROJECT")"
 CONFIG="$PROJECT/.claude/agent-config.yaml"
+
+# Dual policy:
+#   user-level (~/.claude/agents) → symlink (live: editing master reflects instantly)
+#   project-level                 → cp     (snapshot: project pins a version, master edits don't leak in)
+# See agency-agents/CLAUDE.md "Agent 自动发现". Override with SYNC_MODE=link|copy if ever needed.
+if [[ "${SYNC_MODE:-}" == "link" ]]; then
+  LINK_MODE=1
+elif [[ "${SYNC_MODE:-}" == "copy" ]]; then
+  LINK_MODE=0
+elif [[ "$PROJECT" == "$HOME" ]]; then
+  LINK_MODE=1
+else
+  LINK_MODE=0
+fi
 
 if [[ ! -f "$CONFIG" ]]; then
   echo "ERROR: No agent-config.yaml found at $CONFIG"
@@ -88,13 +104,26 @@ for rel in "${FILES[@]}"; do
     continue
   fi
 
-  if [[ -f "$dest" ]] && cmp -s "$src" "$dest"; then
-    SKIPPED=$((SKIPPED+1))
-    continue
+  if [[ "$LINK_MODE" == "1" ]]; then
+    # Symlink mode: dest should be a symlink pointing at the master file.
+    if [[ -L "$dest" && "$(readlink "$dest")" == "$src" ]]; then
+      SKIPPED=$((SKIPPED+1))
+      continue
+    fi
+    # Replace whatever is there (stale symlink, or a drifted real-file copy) with a fresh link.
+    ln -sfn "$src" "$dest"
+    SYNCED=$((SYNCED+1))
+  else
+    # Copy mode (snapshot). Skip only if an identical *real file* is already there.
+    if [[ -f "$dest" && ! -L "$dest" ]] && cmp -s "$src" "$dest"; then
+      SKIPPED=$((SKIPPED+1))
+      continue
+    fi
+    # If a stale symlink is sitting here, drop it first so we write a real copy, not through the link.
+    [[ -L "$dest" ]] && rm -f "$dest"
+    cp "$src" "$dest"
+    SYNCED=$((SYNCED+1))
   fi
-
-  cp "$src" "$dest"
-  SYNCED=$((SYNCED+1))
 done
 
 # Report stale (file present in target but not in config)
@@ -110,6 +139,7 @@ if [[ -d "$TARGET" ]]; then
 fi
 
 total=$(ls "$TARGET"/*.md 2>/dev/null | wc -l | tr -d ' ')
-echo "Done: $SYNCED synced, $SKIPPED unchanged, $ERRORS errors, $STALE stale (in target but not in config)"
+MODE_LABEL=$([[ "$LINK_MODE" == "1" ]] && echo "symlink (live)" || echo "copy (snapshot)")
+echo "Done [$MODE_LABEL]: $SYNCED synced, $SKIPPED unchanged, $ERRORS errors, $STALE stale (in target but not in config)"
 echo "Target: $TARGET ($total agents total)"
 echo "Master: $MASTER_LIB"

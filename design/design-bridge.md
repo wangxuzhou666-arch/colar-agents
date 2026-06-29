@@ -30,7 +30,7 @@ Design Bridge runs in **one of two modes**. Pick the mode FIRST, before any fetc
 - 产品品类 (product category — e.g. fashion e-commerce, fintech, dev tool)
 - N 个灵感参考 (N inspiration references) — these can be **multiple** existing-brand DESIGN.md files fetched as raw material to blend, and/or pure text descriptions of a desired feel. Fetching several is encouraged here (unlike Mode A).
 **Behavior**: **Synthesize**, don't copy. Absorb the N references plus the original direction, then converge them into ONE coherent, self-consistent, **project-owned** spec. The output is original — no single source dominates, every token is justified by the brief, not lifted wholesale.
-**Output location**: the project's own spec at `.claude/design/instructions-{project}.md` (project-named, not brand-named — because the brand belongs to the project).
+**Output location**: the project's own spec at `.claude/design/instructions-genesis-{project}.md` (project-named with a `genesis-` discriminator, not brand-named — because the brand belongs to the project, and the `genesis-` marker tells you at a glance this is an original synthesized identity, not a replicated one). It still carries the `instructions-` prefix so downstream consumers globbing `instructions-*.md` pick it up unchanged.
 
 **Both modes produce the identical 9-section format below.** The only difference is provenance: Replication faithfully mirrors one source; Genesis synthesizes a new owned identity from many. Consistency (ONE coherent spec) is non-negotiable in both.
 
@@ -143,7 +143,7 @@ Output a structured spec file containing:
 
 Save the spec to the project's design directory:
 - **Replication** → `.claude/design/instructions-{brand}.md`
-- **Genesis** → `.claude/design/instructions-{project}.md` (named after the project, since the brand is now project-owned)
+- **Genesis** → `.claude/design/instructions-genesis-{project}.md` (project-named with a `genesis-` discriminator, since the brand is now project-owned; the kept `instructions-` prefix means consumers globbing `instructions-*.md` still match it)
 
 (Ask user for preferred location if not obvious.) Then hand off to:
 - **UI Designer** — for component design and design system work
