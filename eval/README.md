@@ -55,6 +55,17 @@ bash eval/run-eval.sh --agent code-reviewer    # AFTER — compare pass rate
 A drop in pass rate (or the degradation-probe case flipping) means the edit hurt
 the agent. **Exit code 0 = all pass, 1 = at least one FAIL** — so it can gate CI.
 
+> ⚠️ **Degradation probes are flaky on a single run — use majority-of-3.** A
+> probe's verdict is sensitive to agent output non-determinism: the same prompt
+> can flip PASS↔FAIL run to run (observed on `sd-no-architect-overreach`). To
+> judge whether a probe passes or regressed, run it 3× (`--case <probe-id>`) and
+> take the majority — a single PASS/FAIL is not authoritative. Normal cases are
+> stable enough to trust on one run. If verdicts wobble, first check *which*
+> variance it is: re-read the judge reasoning — different scores on the **same
+> output** = judge variance (tighten criteria); different scores on **different
+> outputs** = agent variance (strengthen the agent's boundary language, the
+> criteria is fine).
+
 > ⚠️ **Piping eats the exit code.** `run-eval.sh | tee log.txt` reports `tee`'s
 > status (always 0), masking FAILs. For CI gating, don't pipe
 > (`bash run-eval.sh; echo $?`), or capture `${PIPESTATUS[0]}`:

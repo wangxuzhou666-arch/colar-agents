@@ -81,6 +81,14 @@ echo $?                                          # 0=全 pass，1=有 FAIL（可
 - **全量 ~24 Opus calls 有真实 token 成本**，改单 agent 只跑该 agent（`--agent`），smoke 用 `--case`。别随手跑全套。
 - **implementer 类（senior-developer）validity caveat**：纯 `claude -p` 无工具沙盒会让 implementer 退回"描述计划"而非贴代码；`sd-` 实现 case 已用「显式声明无工具→直接贴代码」修，degradation-probe `sd-no-architect-overreach` 两种环境都 valid。bare 实现 prompt 在此 FAIL 多半是环境错配不是 prompt 退化——别据此回退生产 prompt。
 - **master 是 symlink → 部署**，改 master 即时生效且 eval 读的就是 master，无需 sync。
+- **degradation-probe 用 majority-of-3，别信单跑**：probe case 的 verdict 受 agent 输出非确定性影响会偶发翻车（实测 `sd-no-architect-overreach` 同 prompt 单跑 PASS↔FAIL）。判 probe 通过/回归用 `--case <probe-id>` **跑 3 次取多数票**，单次 PASS/FAIL 不作数。普通 case 单跑即可。
+
+### 变异来源辨析（抖了先归因再动手）
+
+eval verdict 抖动有两个独立来源，**修法相反，先分清**：
+- **Judge 变异**（同一 agent 输出被打出不同分）→ 收紧 criteria 措辞（MUST/MUST NOT、concrete checkable）。
+- **Agent 变异**（agent 本身在边界 case 上时对时错，judge 各自打分都对）→ **不是 criteria 问题，是 prompt 弱点**，强化 agent 边界语言治本 + probe 用 majority-vote 防误判。
+- 辨别法：读多次 judge reasoning——描述的是**同一个输出**给不同分 = judge 变异；描述**不同输出** = agent 变异。
 
 详见 `eval/README.md`。覆盖面扩展（补 agent cases）见该 README「Adding a case」。
 
