@@ -55,6 +55,23 @@ bash eval/run-eval.sh --agent code-reviewer    # AFTER — compare pass rate
 A drop in pass rate (or the degradation-probe case flipping) means the edit hurt
 the agent. **Exit code 0 = all pass, 1 = at least one FAIL** — so it can gate CI.
 
+> ⚠️ **Piping eats the exit code.** `run-eval.sh | tee log.txt` reports `tee`'s
+> status (always 0), masking FAILs. For CI gating, don't pipe
+> (`bash run-eval.sh; echo $?`), or capture `${PIPESTATUS[0]}`:
+> ```bash
+> bash eval/run-eval.sh 2>&1 | tee log.txt; exit ${PIPESTATUS[0]}
+> ```
+
+> ⚠️ **Validity caveat — implementer-class agents are under-measured here.**
+> This harness runs agents via plain `claude -p` with **no tools and no real
+> repo**. That fits agents whose output IS text (Code Reviewer, UI Designer), but
+> an agent whose real job is editing files (Senior Developer) tends to *describe a
+> plan* instead of emitting code unless the case input explicitly says "no file
+> tools available — output the code inline" (see the two `sd-` implementation
+> cases). A bare implementation prompt failing here is usually this environment
+> mismatch, not a prompt regression. The text-shaped degradation probe
+> (`sd-no-architect-overreach`) stays valid either way.
+
 ## Cost warning
 
 Each case = **2 `claude` calls** (agent + judge), both on Opus. Full run is
