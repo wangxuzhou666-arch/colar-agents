@@ -28,6 +28,7 @@ act → /diff → commit
 ⑦ /review（code quality + 安全 + 逻辑）
    ↳ 若本次改了**已覆盖 agent 的 prompt body** → 必跑 Agent Prompt-Edit Gate（before/after eval 对比，见上方专节）
 ⑧ save memory（非显而易见的决策） + SOUL drift check
+   ↳ 若本 session 产出可复用 procedure（稳定触发 + 可固化步骤）→ 跑 /capture-skill（层 3，带写时查重，见上方专节）
    ↳ 若新 memory 否定/升级了 SOUL.md 某条声明，立即同步 SOUL（手动）
    ↳ 想跑 drift 扫描：`bash ~/Desktop/agency-agents/scripts/drift-check.sh`（当前未自动接入 Stop hook）
 ⑨ commit
@@ -47,6 +48,7 @@ act → /diff → commit
    ↳ 若重构涉及**已覆盖 agent 的 prompt body** → 必跑 Agent Prompt-Edit Gate（before/after eval 对比，见上方专节）
 ⑦ /review
 ⑧ save memory（关键架构决策的 trade-off + 被排除方案的原因） + SOUL drift check
+   ↳ 若本 session 产出可复用 procedure → 跑 /capture-skill（层 3 procedural capture，带写时查重，见上方专节）
    ↳ 架构性变更尤其容易让 SOUL 过期 — 写完 memory 后立即同步 SOUL 受影响段落
    ↳ 手动跑 `bash ~/Desktop/agency-agents/scripts/drift-check.sh`；改 SOUL 后反向 grep memory 列 deprecate 候选
 ⑨ PR
@@ -257,6 +259,16 @@ Master: ~/Desktop/agency-agents/  ← agent 源（不直接加载，通过 sync 
 - 下次 session 需要继承的上下文
 
 不存：代码模式、文件路径、git 历史（这些直接读代码）。
+
+## Procedural Capture 节点（Tier 2/3 结束时，与 save memory 并列）
+
+save memory 处理 **semantic**（事实 / 决策）；**若本 session 还产出了「可复用 procedure」** → 跑 `/capture-skill` 蒸馏成层 3 **procedural** skill（attach-on-demand 的 SKILL.md）。两者是不同 memory 型，分开走。
+
+- **判据**：skill = "当 X 触发 → 照 Procedure 走"；说不出稳定触发条件的不是 skill（是一次性操作，丢弃）。
+- **主动遗忘 > 无脑累积**（Colar 纪律）：宁可不 capture，不攒垃圾 skill。`/capture-skill` 的 Step 0「值得 gate」+ Step 2「写时 4-类查重」就是防累积腐烂。
+- **不会重复堆叠**：写时查重（重复跳过 / 升级改旧 / 细化加 pointer / 正交新建），命中「升级」停等拍板。
+- **落盘后由 `/ship` 提交**（skill 住本 repo，version-controlled）；命令自身不 commit。
+- 索引：`integrations/hermes/skills/SKILLS.md`（权威工作索引）。
 
 ## SOUL ↔ Memory Sync（每次 save memory 时检查）
 
