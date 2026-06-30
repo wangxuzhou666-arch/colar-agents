@@ -75,7 +75,7 @@ This is the identity layer (SOUL) — **axioms only**. Project workflow lives in
 - 库存清单、todo 列表（用 task tracker）
 - 项目进度百分比（去看 git log）
 
-**Why**：内容腐烂是 memory 系统真正的失败模式（不是文件爆炸）。动态数据放 memory 会让 Claude 引用过期信息做判断。动态数据应该放：项目专属文件 / `colar-wiki/raw/` / 独立 tracker。
+**Why**：内容腐烂是 memory 系统主要的失败模式；但文件爆炸与腐烂同根因（文件增长会侵蚀人工索引完整性——索引折叠、计数 drift 是早期信号），非二选一。动态数据放 memory 会让 Claude 引用过期信息做判断。动态数据应该放：项目专属文件 / `colar-wiki/raw/` / 独立 tracker。
 
 ## Time Anchoring Discipline（时间锚点纪律）
 
