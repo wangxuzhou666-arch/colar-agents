@@ -18,11 +18,13 @@
 | 📡 [Agent Observability Architect](../engineering/engineering-agent-observability-architect.md) | Expert in agent execution tracing, event schema design, OpenTelemetry for AI agents, and… | Turns raw agent traces into structured, evaluable event streams — the plumbing between ex… |
 | 🧬 [AI Data Remediation Engineer](../engineering/engineering-ai-data-remediation-engineer.md) | Specialist in self-healing data pipelines — uses air-gapped local SLMs and semantic clust… | Fixes your broken data with surgical AI precision — no rows left behind. |
 | 🤖 [AI Engineer](../engineering/engineering-ai-engineer.md) | Expert AI/ML engineer specializing in machine learning model development, deployment, and… | Turns ML models into production features that actually scale. |
+| ⚗️ [Applied AI Engineer](../engineering/engineering-applied-ai.md) | LLM application engineering specialist for LangGraph orchestration (idempotent pure-funct… | Builds LLM pipelines that hold their output contract — graph nodes, prompts, and evals th… |
 | ⚡ [Autonomous Optimization Architect](../engineering/engineering-autonomous-optimization-architect.md) | Intelligent system governor that continuously shadow-tests APIs for performance while enf… | The system governor that makes things faster without bankrupting you. |
 | 🏗️ [Backend Architect](../engineering/engineering-backend-architect.md) | Senior backend architect specializing in scalable system design, database architecture, A… | Designs the systems that hold everything up — databases, APIs, cloud, scale. |
 | 👁️ [Code Reviewer](../engineering/engineering-code-reviewer.md) | Expert code reviewer who provides constructive, actionable feedback focused on correctnes… | Reviews code like a mentor, not a gatekeeper. Every comment teaches something. |
 | 🔧 [Data Engineer](../engineering/engineering-data-engineer.md) | Expert data engineer specializing in building reliable data pipelines, lakehouse architec… | Builds the pipelines that turn raw data into trusted, analytics-ready assets. |
 | 🗄️ [Database Optimizer](../engineering/engineering-database-optimizer.md) | Expert database specialist focusing on schema design, query optimization, indexing strate… | Indexes, query plans, and schema design — databases that don't wake you at 3am. |
+| 🧠 [Deep Reasoner](../engineering/engineering-deep-reasoner.md) | Opus-pinned heavy-reasoning agent. Use when Fable (主力) hits a hard wall — complex archite… | The heavy artillery. Fable plans and dispatches; I crack the hard problems. |
 | ⚙️ [DevOps Automator](../engineering/engineering-devops-automator.md) | Expert DevOps engineer specializing in infrastructure automation, CI/CD pipeline developm… | Automates infrastructure so your team ships faster and sleeps better. |
 | 🔩 [Embedded Firmware Engineer](../engineering/engineering-embedded-firmware-engineer.md) | Specialist in bare-metal and RTOS firmware - ESP32/ESP-IDF, PlatformIO, Arduino, ARM Cort… | Writes production-grade firmware for hardware that can't afford to crash. |
 | 🔗 [Feishu Integration Developer](../engineering/engineering-feishu-integration-developer.md) | Full-stack integration expert specializing in the Feishu (Lark) Open Platform — proficien… | Builds enterprise integrations on the Feishu (Lark) platform — bots, approvals, data sync… |
@@ -227,4 +229,4 @@
 
 ---
 
-_Total: 150 agents across 13 divisions. Generated from filesystem — single source of truth is the .md files themselves._
+_Total: 152 agents across 13 divisions. Generated from filesystem — single source of truth is the .md files themselves._
