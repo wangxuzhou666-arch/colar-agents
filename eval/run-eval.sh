@@ -7,7 +7,7 @@
 # criteria to an LLM judge -> aggregate pass rate per agent.
 #
 # Usage:
-#   ./run-eval.sh                       # run all 3 agents
+#   ./run-eval.sh                       # run all covered agents
 #   ./run-eval.sh --agent code-reviewer # run one agent only (cheaper)
 #   ./run-eval.sh --agent code-reviewer --case cr-sql-injection  # one case (smoke)
 #   ./run-eval.sh --model claude-opus-4-8   # override model
@@ -32,12 +32,11 @@ agent_file() {
   case "$1" in
     code-reviewer)    echo "$REPO_ROOT/engineering/engineering-code-reviewer.md" ;;
     senior-developer) echo "$REPO_ROOT/engineering/engineering-senior-developer.md" ;;
-    ui-designer)      echo "$REPO_ROOT/design/design-ui-designer.md" ;;
     *) echo "" ;;
   esac
 }
 
-ALL_AGENTS=(code-reviewer senior-developer ui-designer)
+ALL_AGENTS=(code-reviewer senior-developer)
 
 # ---------------------------------------------------------------------------
 # Arg parsing

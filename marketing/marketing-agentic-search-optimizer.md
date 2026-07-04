@@ -299,4 +299,4 @@ This agent operates at wave 3 of AI-driven acquisition. For comprehensive AI vis
 - Pair with **AI Citation Strategist** for wave 2 coverage (getting cited by AI assistants)
 - Pair with **SEO Specialist** for wave 1 coverage (traditional search rankings)
 - Pair with **Frontend Developer** for clean WebMCP implementation in JavaScript frameworks
-- Pair with **UX Architect** to redesign agent-hostile flows (custom widgets, multi-step barriers)
+- Pair with the **main loop's skill-based design stack** (frontend-design plugin + ui-ux-pro-max) to redesign agent-hostile flows (custom widgets, multi-step barriers)

@@ -12,13 +12,15 @@ and compare pass rates — if a change regresses an agent, a case flips to FAIL.
 Output quality only (golden input → run agent → judge scores against criteria).
 It does **not** test routing/description quality — that's a separate concern.
 
-Three agents, 4 golden cases each:
+Two agents, 4 golden cases each:
 
 | Agent | Master file | Cases |
 |---|---|---|
 | Code Reviewer | `engineering/engineering-code-reviewer.md` | `cases/code-reviewer.jsonl` (4) |
 | Senior Developer | `engineering/engineering-senior-developer.md` | `cases/senior-developer.jsonl` (4) |
-| UI Designer | `design/design-ui-designer.md` | `cases/ui-designer.jsonl` (4) |
+
+> 2026-07-04: UI Designer retired (design work moved to the skill-based stack:
+> frontend-design plugin + ui-ux-pro-max); its cases were removed with it.
 
 Each agent has one **degradation-probe** case (a scope-boundary test) designed to
 flip to FAIL first if the prompt's boundary language gets damaged.
@@ -38,7 +40,7 @@ flip to FAIL first if the prompt's boundary language gets damaged.
 ```bash
 cd ~/Desktop/agency-agents
 
-bash eval/run-eval.sh                                   # all 3 agents (~24 claude calls)
+bash eval/run-eval.sh                                   # all covered agents (~16 claude calls)
 bash eval/run-eval.sh --agent code-reviewer             # one agent only (cheaper)
 bash eval/run-eval.sh --agent code-reviewer --case cr-sql-injection   # one case (smoke)
 bash eval/run-eval.sh --model claude-opus-4-8           # override model
@@ -75,7 +77,7 @@ the agent. **Exit code 0 = all pass, 1 = at least one FAIL** — so it can gate 
 
 > ⚠️ **Validity caveat — implementer-class agents are under-measured here.**
 > This harness runs agents via plain `claude -p` with **no tools and no real
-> repo**. That fits agents whose output IS text (Code Reviewer, UI Designer), but
+> repo**. That fits agents whose output IS text (Code Reviewer), but
 > an agent whose real job is editing files (Senior Developer) tends to *describe a
 > plan* instead of emitting code unless the case input explicitly says "no file
 > tools available — output the code inline" (see the two `sd-` implementation
@@ -86,7 +88,7 @@ the agent. **Exit code 0 = all pass, 1 = at least one FAIL** — so it can gate 
 ## Cost warning
 
 Each case = **2 `claude` calls** (agent + judge), both on Opus. Full run is
-3 agents × 4 cases × 2 = **~24 calls**, a few minutes and real token spend. For
+2 agents × 4 cases × 2 = **~16 calls**, a few minutes and real token spend. For
 iterating on one agent use `--agent`; for a sanity check use `--case`. Don't run
 the full suite casually.
 

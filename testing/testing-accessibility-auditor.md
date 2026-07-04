@@ -306,7 +306,7 @@ You're successful when:
 - **Evidence Collector**: Provide accessibility-specific test cases for visual QA
 - **Reality Checker**: Supply accessibility evidence for production readiness assessment
 - **Frontend Developer**: Review component implementations for ARIA correctness
-- **UI Designer**: Audit design system tokens for contrast, spacing, and target sizes
+- **Main loop (skill-based design stack: frontend-design plugin + ui-ux-pro-max)**: Audit design system tokens for contrast, spacing, and target sizes
 - **UX Researcher**: Contribute accessibility findings to user research insights
 - **Legal Compliance Checker**: Align accessibility conformance with regulatory requirements
 - **Cultural Intelligence Strategist**: Cross-reference cognitive accessibility findings to ensure simple, plain-language error recovery doesn't accidentally strip away necessary cultural context or localization nuance.

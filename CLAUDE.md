@@ -64,10 +64,10 @@ act → /diff → commit
 
 | 改的是 | 动作 |
 |---|---|
-| **已覆盖 agent** 的 prompt body（`code-reviewer` / `senior-developer` / `ui-designer`） | **强制 gate**：改前跑 baseline → 改 → 再跑对比；pass rate 掉 or degradation-probe case 翻 FAIL = 这次改伤了 agent，回退或修 |
+| **已覆盖 agent** 的 prompt body（`code-reviewer` / `senior-developer`） | **强制 gate**：改前跑 baseline → 改 → 再跑对比；pass rate 掉 or degradation-probe case 翻 FAIL = 这次改伤了 agent，回退或修 |
 | **未覆盖 agent** 的 prompt body（其余所有） | **无 eval 覆盖 = 盲改**。告知 Colar「{agent} 无 eval case，改 prompt 飞盲；要先补 4 个 case 再改吗？」按 SOUL ask-when-uncertain 处理 |
 
-### 命令（单 agent 迭代用 `--agent`，别跑全量 24 calls）
+### 命令（单 agent 迭代用 `--agent`，别跑全量 16 calls）
 
 ```bash
 cd ~/Desktop/agency-agents
@@ -80,7 +80,7 @@ echo $?                                          # 0=全 pass，1=有 FAIL（可
 ### 铁律
 
 - **退出码判 pass/fail，别用管道**：`| tee` 让退出码取 tee（恒 0）掩盖 FAIL。要存 log 用 `bash eval/run-eval.sh 2>&1 | tee log.txt; exit ${PIPESTATUS[0]}`，否则裸跑 `; echo $?`。
-- **全量 ~24 Opus calls 有真实 token 成本**，改单 agent 只跑该 agent（`--agent`），smoke 用 `--case`。别随手跑全套。
+- **全量 ~16 Opus calls 有真实 token 成本**，改单 agent 只跑该 agent（`--agent`），smoke 用 `--case`。别随手跑全套。
 - **implementer 类（senior-developer）validity caveat**：纯 `claude -p` 无工具沙盒会让 implementer 退回"描述计划"而非贴代码；`sd-` 实现 case 已用「显式声明无工具→直接贴代码」修，degradation-probe `sd-no-architect-overreach` 两种环境都 valid。bare 实现 prompt 在此 FAIL 多半是环境错配不是 prompt 退化——别据此回退生产 prompt。
 - **master 是 symlink → 部署**，改 master 即时生效且 eval 读的就是 master，无需 sync。
 - **degradation-probe 用 majority-of-3，别信单跑**：probe case 的 verdict 受 agent 输出非确定性影响会偶发翻车（实测 `sd-no-architect-overreach` 同 prompt 单跑 PASS↔FAIL）。判 probe 通过/回归用 `--case <probe-id>` **跑 3 次取多数票**，单次 PASS/FAIL 不作数。普通 case 单跑即可。
@@ -135,7 +135,7 @@ Master: ~/Desktop/agency-agents/  ← agent 源（不直接加载，通过 sync 
 ### 路由歧义裁决（两个 agent 都像）
 
 分类时若有 ≥2 个 agent 的 description 都匹配且置信度接近 → 路由歧义。处理：
-- 先看 description 里的**排他/排除条款**（如 UI Designer "NOT CSS architecture" vs UX Architect "NOT visual aesthetics"）裁决。
+- 先看 description 里的**排他/排除条款**（如 Senior Developer "NOT LLM-pipeline 层" vs Applied AI Engineer "NOT 通用 full-stack CRUD"）裁决。
 - 排除条款也分不开 → **这是判断类不确定，按 SOUL「ask when uncertain」先问 Colar**，不要赌一个。
 - 跨域且子任务可拆 → 不要二选一，拆成多个 agent 并行（见 fan-out）。
 
@@ -200,7 +200,7 @@ Master: ~/Desktop/agency-agents/  ← agent 源（不直接加载，通过 sync 
 | 一般工程 | 自动 — Tier 1 的 Software Architect / Senior Dev / Code Reviewer 覆盖 |
 | 安全审计 | `/cso` 或项目已部署的 Security Engineer |
 | 方案设计 / 架构 | Workflow Architect（Tier 1 自带） |
-| **UI/UX 设计** | **走下方 UI/UX Pipeline（必经 Design Bridge）** |
+| **UI/UX 设计** | **走下方 UI/UX Pipeline（必经 Design Bridge；视觉/UI 执行走 skill 方案，主 loop 直接处理）** |
 | 专项领域 | 项目的 `.claude/agents/` 里已部署的专项 agent |
 | 多领域交叉 | 按 **默认 Fan-out 判据** 并行，常规 ≤3、上限 5 |
 
@@ -216,15 +216,17 @@ Master: ~/Desktop/agency-agents/  ← agent 源（不直接加载，通过 sync 
    └── Genesis（原创产品创世，原创项目推荐）：客户画像 + 调性 + 品类 + N 个灵感参考
        → 合成原创自洽 DESIGN.md → 输出 instructions-genesis-{project}.md
    ↓
-② 并行分发（根据任务类型选 1-2 个）
-   ├── UI Designer      → 组件设计、设计系统、视觉规范
-   ├── UX Architect      → CSS 架构、layout 框架、响应式策略
-   └── UX Researcher     → 用户调研、可用性测试（如有需要）
+② 设计执行 — skill 方案，主 loop 直接处理（不再路由给专门 design agent）
+   ├── frontend-design plugin（Anthropic 官方）→ 组件设计、设计系统、视觉规范
+   ├── ui-ux-pro-max skill → CSS 架构、layout 框架、响应式策略
+   └── UX Researcher agent   → 用户调研、可用性测试（如有需要，仍走 agent）
    ↓
 ③ Frontend Developer → 实现落地
    ↓
 ④ /diff → build → /review
 ```
+
+> 2026-07-04 起 UI Designer / UX Architect 两个 design agent 已退役，视觉与 CSS 架构职能由上述 skill 方案接管。Design Bridge 的门卫地位不变，产出的 instructions 由主 loop（带 skill）+ Frontend Developer 消费。
 
 ### 触发条件（满足任一即走此 pipeline）
 

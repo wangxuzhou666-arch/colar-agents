@@ -136,7 +136,7 @@ bash ~/Desktop/agency-agents/scripts/sync-agents.sh "$(pwd)"
 
 ### UI/UX Design Bridge (设计前置门卫)
 
-任何 UI 设计任务必经的前置 agent。它先确定目标品牌 (66 个可选: Linear / Stripe / Notion / Apple / Vercel / Spotify ...) → fetch 对应的 DESIGN.md → 输出 `instructions-{brand}.md` → 后续 UI Designer / UX Architect / Frontend Developer 都读这份 instructions。
+任何 UI 设计任务必经的前置 agent。它先确定目标品牌 (66 个可选: Linear / Stripe / Notion / Apple / Vercel / Spotify ...) → fetch 对应的 DESIGN.md → 输出 `instructions-{brand}.md` → 后续消费方是主 loop 的 skill 方案 (frontend-design plugin + ui-ux-pro-max) 和 Frontend Developer。
 
 不跳过。即使是"改个按钮颜色",也先检查 design spec 存不存在。
 
