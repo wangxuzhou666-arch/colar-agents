@@ -34,7 +34,11 @@ let A = args
 if (typeof A === 'string') { try { A = JSON.parse(A) } catch (e) { A = { question: args } } }
 if (!A || typeof A !== 'object') A = {}
 
-const Q = (A && A.question) || '（未提供 question — 请在 args.question 写要审的决策）'
+// fail-fast：question 缺失/空白直接抛错，绝不下发占位符给专家。
+// 静默降级是根因：2026-07-03 字符串投递丢 question 踩过一次；
+// 2026-07-06 调用方传了 object 但用了自造 key（无 question 字段）又白烧一整轮（4 专家 ×86k token）。
+const Q = (A.question != null && String(A.question).trim()) || null
+if (!Q) throw new Error('expert-panel: args.question 缺失或为空 — 拒绝开 panel。最少传 {question: "要审的决策"}，完整 args 约定见脚本头部注释。')
 const CTX = (A && A.context) ? `\n\n## 已知上下文（视为事实，不要重新质疑其存在性）\n${A.context}` : ''
 const EVAL = !!(A && A.evalMode)
 const VOTES = Math.max(1, (A && A.verifyVotes) || 1)
