@@ -386,7 +386,7 @@ ${EVAL ? '6. decision 给 Floor / Base / Optimal 三档。' : ''}`,
 )
 
 // ───────────────────────── runRecord：紧凑可落盘的一行元数据（T2 台账 + castMode 可见化）─────────────────────────
-// 聚合本次 run 的裁决/置信度分布，供调用侧 append 到 panel-runs.jsonl，让 fallback 率 / refute 率长期可观测。
+// 聚合本次 run 的裁决/置信度分布，随 return 交回调用侧做单次 run 的可观测（不持久化成台账文件——主动遗忘，修前基线快照留在 git colar-memory@cc75d98）。
 const _vstat = { HOLDS: 0, REFUTED: 0, UNVERIFIABLE: 0 }
 const _cstat = { HIGH: 0, MEDIUM: 0, LOW: 0, UNVERIFIED: 0 }
 for (const r of clean) {
@@ -423,7 +423,7 @@ return {
   expertCount: clean.length,
   tokensSpent: budget ? budget.spent() : null,
   castMode,        // explicit | selector | generic-optin —— 调用侧可据此确认按题选人是否生效
-  runRecord,       // 调用侧 append 到 ~/Desktop/colar-memory/transcripts/panel-runs.jsonl
+  runRecord,       // 本次 run 的紧凑元数据（castMode/verdictStats/confidenceStats/stopReason），供调用侧当场查看，不持久化
   synthesis,
   perExpert: digest,
 }
