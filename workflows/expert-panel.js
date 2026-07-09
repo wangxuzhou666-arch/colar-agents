@@ -19,17 +19,20 @@ export const meta = {
 //             workflow 用一个 selector agent 读 question 从 roster 里挑 2-4 个 cast
 //             （roster 由调用方传入而非 workflow 内硬编码 → 既不引入注册表 drift，
 //              又不让「忘传 experts」静默降级成通用 panel —— 2026-07-03 args-contract 事故的根因）。
-//             experts 和 agentRoster 都不传，才掉进写死的通用 panel（仅安全网，非智能选择）。
+//             experts 和 agentRoster 都不传：v2 起【拒绝】静默用通用 panel —— 除非显式 generic:true（见下）。
 //   evalMode: boolean (选填) — true 时强制每个专家给 Floor/Base/Optimal 三档（idea/方案评估用）
+//   generic:  boolean (选填) — 显式要写死通用默认盘（Trend/PM/Architect/Security）的逃生舱。
+//             不传 experts/agentRoster 又不传 generic:true → 直接抛错（禁静默降级，2026-07-09 加）。
 //   verifyVotes: number (选填，默认 1) — 每个 claim 派几个 skeptic（>1 = 多视角对抗）
 //   verifyLow: boolean (选填，默认 false) — true 时连 LOW confidence 的 claim 也对抗验证（更狠、更烧 token）
 //   maxRounds: number (选填) — 显式限定深挖轮数。不传时：有 budget → 跑到预算耗尽（硬上限 HARD_ROUND_CAP）；无 budget → 单轮（向后兼容）
+//   depth:    boolean (选填) — 一键深挖：无需传 budget 就触发多轮（critic 门控收口，封顶 DEPTH_ROUND_CAP=4）。要更深传 budget 或 maxRounds。
 //   budgetFloor: number (选填，默认 50000) — budget.remaining() 低于此值就不再开新轮，留够 synthesize 的余量
 // }
 // ⚠️ harness 在某些环境下把 args 当 JSON 字符串投递（实测 typeof args === 'string'）。
 // 脚本控制不了投递方式，所以在此做防御性归一：是 JSON 字符串就 parse；
-// parse 失败（传进来的是裸问题字符串、非 JSON）就降级把整段当 question，
-// 避免静默落进占位符「（未提供）」让专家对着空输入白跑一轮（2026-07-03 踩过）。
+// parse 失败（传进来的是裸问题字符串、非 JSON）就把整段当 question —— 但 v2 起裸串因无 experts
+// 会在专家解析处 hard-refuse（除非 generic:true），不再静默降级成通用盘（2026-07-09 起，见下方解析）。
 let A = args
 if (typeof A === 'string') { try { A = JSON.parse(A) } catch (e) { A = { question: args } } }
 if (!A || typeof A !== 'object') A = {}
@@ -45,14 +48,17 @@ const VOTES = Math.max(1, (A && A.verifyVotes) || 1)
 const VERIFY_LEVELS = (A && A.verifyLow) ? ['HIGH', 'MEDIUM', 'LOW'] : ['HIGH', 'MEDIUM']
 const BUDGET_FLOOR = (A && A.budgetFloor) || 50000
 const HARD_ROUND_CAP = 12 // runaway 兜底：即使预算充足也不超过这么多轮
-// 轮数策略：显式 maxRounds 优先；否则有 budget 跑到预算耗尽（封顶 HARD_ROUND_CAP）；无 budget 单轮。
+const DEPTH = !!(A && A.depth === true) // 一键深挖：无需手动传 budget 也触发多轮（critic 门控，DEPTH_ROUND_CAP 封顶）
+const DEPTH_ROUND_CAP = 4 // depth:true 且无 budget 时的轮数上限（靠 critic.complete 提前收口，这只是兜底）
+// 轮数策略：显式 maxRounds 优先；否则有 budget 跑到预算耗尽；再否则 depth:true 跑到 critic 收口（封顶 DEPTH_ROUND_CAP）；都没有 → 单轮（向后兼容）。
 const MAX_ROUNDS = (A && A.maxRounds)
   ? Math.min(A.maxRounds, HARD_ROUND_CAP)
-  : (budget && budget.total ? HARD_ROUND_CAP : 1)
+  : (budget && budget.total ? HARD_ROUND_CAP : (DEPTH ? DEPTH_ROUND_CAP : 1))
 
 // 专家来源优先级：显式 experts > selector(读 agentRoster 匹配) > 写死通用 panel(安全网)。
 const hasExplicitExperts = !!(A && Array.isArray(A.experts) && A.experts.length)
 const ROSTER = (A && Array.isArray(A.agentRoster) && A.agentRoster.length) ? A.agentRoster : null
+const GENERIC_OK = !!(A && A.generic === true) // 显式要通用默认盘的逃生舱；无 experts/roster 且无此标志 → 拒绝（禁静默降级）
 const GENERIC_PANEL = [
   { agentType: 'Trend Researcher',     lens: '市场/竞品/外部真实验证 — 有没有人已经做、为什么没成' },
   { agentType: 'Product Manager',      lens: '用户 JTBD、真实需求强度、distribution 现实' },
@@ -66,10 +72,11 @@ const GROUND_RULES = `
 1. 证据门控：每条 claim 必须附证据 —— 代码 file:line / grep|ls 输出 / 外部可点 URL / 具体数据。
 2. 反编造：无法验证的 claim 一律标 confidence="UNVERIFIED" 并说明缺什么证据；绝不 fabricate 数据/URL/"我跑了发现 X"。能力上做不到的（如无浏览器跑不了实测）直说做不到，不要假装。
 3. 反复读 prompt：不要把问题换个说法复述当结论。只报你独立查证后新增的信息。
-4. 反附和：你的任务是给独立专业判断，不是迎合提问者预期。证据指向反直觉结论时，照实报。`
+4. 反附和：你的任务是给独立专业判断，不是迎合提问者预期。证据指向反直觉结论时，照实报。
+5. 置信度别通胀 + 标验证方式：HIGH 只给"已实际查证、证据在手"的 claim；只推理没查证 = 最多 MEDIUM；没查证但合理 = LOW；查不了 = UNVERIFIED（历史审计发现 75% claim 被标 HIGH = 通胀，别再这样）。每条 claim 标 verifyMethod（code=读码/grep｜web=外部检索｜data=跑数据｜logic=纯推理｜none=不可验证）指明该怎么验。`
 
 const EVAL_RULES = EVAL ? `
-5. 三档锚点（强制）：给 Floor（保守可达）/ Base（现实最可能）/ Optimal（最优情形）三档，不要只给 Optimal。` : ''
+6. 三档锚点（强制）：给 Floor（保守可达）/ Base（现实最可能）/ Optimal（最优情形）三档，不要只给 Optimal。` : ''
 
 // ───────────────────────── schema ─────────────────────────
 const EXPERT_SCHEMA = {
@@ -81,11 +88,12 @@ const EXPERT_SCHEMA = {
       type: 'array', description: '支撑判断的关键 claim，每条带证据',
       items: {
         type: 'object',
-        required: ['claim', 'evidence', 'confidence'],
+        required: ['claim', 'evidence', 'confidence', 'verifyMethod'],
         properties: {
           claim: { type: 'string' },
           evidence: { type: 'string', description: 'file:line / grep 输出 / URL / 数据；无则写缺什么' },
           confidence: { type: 'string', enum: ['HIGH', 'MEDIUM', 'LOW', 'UNVERIFIED'] },
+          verifyMethod: { type: 'string', enum: ['code', 'web', 'data', 'logic', 'none'], description: '这条 claim 该用哪种方式验证：code=读码/grep｜web=外部检索｜data=跑数据/查询｜logic=纯推理｜none=不可验证。' },
         },
       },
     },
@@ -96,9 +104,10 @@ const EXPERT_SCHEMA = {
 
 const VERDICT_SCHEMA = {
   type: 'object',
-  required: ['verdict', 'reason'],
+  required: ['verdict', 'refutationStrength', 'reason'],
   properties: {
     verdict: { type: 'string', enum: ['HOLDS', 'REFUTED', 'UNVERIFIABLE'] },
+    refutationStrength: { type: 'string', enum: ['HARD', 'WEAK', 'NA'], description: 'verdict=REFUTED 时必填：HARD=有具体反证(file:line/命令输出/URL/数据)；WEAK=仅推理或"查无确证"。非 REFUTED 一律 NA。只有 HARD 且过多数才真杀 claim，WEAK 降为 CONTESTED 存疑保留。' },
     reason: { type: 'string', description: '为什么 —— 附反证或确证的具体证据' },
   },
 }
@@ -193,7 +202,7 @@ Claim: ${c.claim}
 专家给的证据: ${c.evidence}
 来源专家: ${res.exp.agentType}
 
-去实际查证（grep/ls/read/web）。判 REFUTED 必须附具体反证（file:line / 命令输出 / URL / 数据）—— 单票就能杀掉这条 claim，所以给不出反证就判 UNVERIFIABLE，不许用直觉/猜测否决真 claim。不确定也判 UNVERIFIABLE，不要默认放过。`,
+去实际查证（grep/ls/read/web）。判 REFUTED 必须附具体反证并标 refutationStrength=HARD（file:line / 命令输出 / URL / 数据）；若只是推理/"查无确证"级别的怀疑 → 仍可判 REFUTED 但 refutationStrength=WEAK（只把 claim 降为"存疑保留"，不直接杀）。给不出任何反证判 UNVERIFIABLE、refutationStrength=NA。不许用直觉/猜测做 HARD 否决真 claim；不确定判 UNVERIFIABLE，不要默认放过。`,
               { label: `verify:${res.exp.agentType}#r${round}`, phase: 'Verify', schema: VERDICT_SCHEMA }
             ).then(v => ({ claim: c.claim, ...v }))
           )
@@ -224,7 +233,13 @@ const SELECTOR_SCHEMA = {
   },
 }
 
-let SEED_EXPERTS = hasExplicitExperts ? A.experts : GENERIC_PANEL
+// 专家来源解析（禁静默降级：无 experts / agentRoster / generic:true → 抛错，不再无声用通用盘 —— 72% 历史 run 的质量悬崖根因）
+let SEED_EXPERTS = null
+let castMode = null
+if (hasExplicitExperts) { SEED_EXPERTS = A.experts; castMode = 'explicit' }
+else if (ROSTER) { castMode = 'selector' } // 具体人选由下方 selector 从 roster 挑；失败再按 generic 逃生舱兜
+else if (GENERIC_OK) { SEED_EXPERTS = GENERIC_PANEL; castMode = 'generic-optin' } // 调用方显式 generic:true 才用通用盘
+else throw new Error('expert-panel: 未传 experts / agentRoster / generic:true —— 拒绝静默用通用默认盘（72% 历史 run 掉这里的质量悬崖根因）。按题选人传 {question, experts:[{agentType, lens}]}；确实只要通用盘传 {question, generic:true}。')
 if (!hasExplicitExperts && ROSTER) {
   const picked = await agent(
     `你是专家 panel 的选人官。从下面的 roster 里挑 2-4 个能给出【互补、非冗余】视角的专家来审这个问题，各写清这一次要它专门挖的 lens。
@@ -244,12 +259,16 @@ ${ROSTER.map(r => `- ${r.agentType} — ${r.description || ''}`).join('\n')}
   const valid = new Set(ROSTER.map(r => r.agentType))
   // 只留 roster 里真实存在的 agentType，防 selector 幻觉出非法 type 让后续 agent() 崩
   const cast = (picked && Array.isArray(picked.experts) ? picked.experts : []).filter(e => valid.has(e.agentType))
-  if (cast.length) { SEED_EXPERTS = cast; log(`selector 从 ${ROSTER.length} 个 roster cast 了 ${cast.length} 个专家`) }
-  else log(`selector 未产出合法专家，回退通用 panel`)
+  if (cast.length) { SEED_EXPERTS = cast; castMode = 'selector'; log(`selector 从 ${ROSTER.length} 个 roster cast 了 ${cast.length} 个专家`) }
+  else if (GENERIC_OK) { SEED_EXPERTS = GENERIC_PANEL; castMode = 'generic-optin'; log('selector 未产出合法专家，且 generic:true → 回退通用盘') }
+  else throw new Error('expert-panel: 传了 agentRoster 但 selector 没选出合法专家，且未 generic:true —— 拒绝静默降级。检查 roster 里 agentType 是否合法，或加 generic:true 兜通用盘。')
 }
 
 // ───────────────────────── 主循环：多轮深挖（budget / maxRounds 驱动）─────────────────────────
-log(`expert-panel: seed ${SEED_EXPERTS.length} 专家｜evalMode=${EVAL}｜verifyVotes=${VOTES}｜verifyLow=${!!(A && A.verifyLow)}｜maxRounds=${MAX_ROUNDS}｜budget=${budget && budget.total ? Math.round(budget.total / 1000) + 'k' : 'none'}`)
+log(`expert-panel: seed ${SEED_EXPERTS.length} 专家｜evalMode=${EVAL}｜verifyVotes=${VOTES}｜verifyLow=${!!(A && A.verifyLow)}｜depth=${DEPTH}｜maxRounds=${MAX_ROUNDS}｜budget=${budget && budget.total ? Math.round(budget.total / 1000) + 'k' : 'none'}`)
+
+// generic 现在是显式 opt-in（generic:true），不再是静默 fallback；这里仅提示它是通用盘、非按题选人
+if (castMode === 'generic-optin') log('ℹ️ generic:true —— 按显式请求用了通用默认盘（Trend/PM/Architect/Security），非按题选人。')
 
 const allResults = []
 const seenClaims = new Set() // 跨轮去重：规范化后的 claim 文本，防止后续轮重复同一论点白烧验证 token
@@ -297,7 +316,7 @@ ${Q}
 ${JSON.stringify(allResults.map(r => ({
       expert: r.exp.agentType,
       summary: r.out && r.out.summary,
-      claims: (r.out && r.out.claims || []).map(c => c.claim),
+      claims: (r.out && r.out.claims || []).map(c => ({ claim: c.claim, verifyMethod: c.verifyMethod, confidence: c.confidence })),
     })), null, 2)}
 
 ## 你的纪律
@@ -324,13 +343,16 @@ const clean = allResults.filter(Boolean)
 function majorityVerdict(verdicts, claim) {
   const vs = verdicts.filter(v => v.claim === claim)
   if (!vs.length) return 'NOTCHECKED'
-  const refuted = vs.filter(v => v.verdict === 'REFUTED').length
-  return refuted > vs.length / 2 ? 'REFUTED' : 'KEPT'
+  const hardRefuted = vs.filter(v => v.verdict === 'REFUTED' && v.refutationStrength === 'HARD').length
+  const anyRefuted = vs.filter(v => v.verdict === 'REFUTED').length
+  if (hardRefuted > vs.length / 2) return 'REFUTED'   // 多数 HARD 反证 → 真杀
+  if (anyRefuted > 0) return 'CONTESTED'              // 有反对但仅 WEAK/未过多数 → 存疑保留，不静默杀（防真话被误杀）
+  return 'KEPT'
 }
 
 const digest = clean.map(r => {
   const claims = (r.out.claims || []).map(c => ({
-    claim: c.claim, confidence: c.confidence, evidence: c.evidence,
+    claim: c.claim, confidence: c.confidence, evidence: c.evidence, verifyMethod: c.verifyMethod,
     status: majorityVerdict(r.verdicts || [], c.claim),
   }))
   return {
@@ -349,11 +371,12 @@ const synthesis = await agent(
 ## 原问题
 ${Q}
 
-## 各专家产出（已附每条 claim 的对抗验证 status：KEPT / REFUTED / NOTCHECKED；round = 第几轮深挖产出）
+## 各专家产出（已附每条 claim 的对抗验证 status：KEPT / CONTESTED（有反对但反证不够硬，存疑保留、不得当既定事实）/ REFUTED / NOTCHECKED；round = 第几轮深挖产出）
 ${JSON.stringify(digest, null, 2)}
 
 ## 合成纪律（硬约束）
 1. status=REFUTED 的 claim 必须剔除，放进 killed 字段，不得进入 agreements/decision。
+1b. status=CONTESTED 的 claim（有反对但反证不够硬/未过多数）：不得当既定事实进 agreements/decision，但【必须】作为"存疑点"进 tensions 显式标注（附反对理由）——这是防"真话被弱反证误杀"的保留位，绝不静默丢弃。
 2. confidence=UNVERIFIED 的 claim（专家自己都没验证的）不得进 agreements/decision；如仍相关只能作为"待验证假设"进 tensions 并显式标注未验证，绝不当既定事实用。
 3. 真实分歧必须放进 tensions 保留 —— 严禁为了"给个干净答案"把对立观点压平成虚假共识。
 4. 禁止附和提问者的既有立场。若 KEPT 证据整体指向提问者不想听的结论，明确说出来。
@@ -362,11 +385,45 @@ ${EVAL ? '6. decision 给 Floor / Base / Optimal 三档。' : ''}`,
   { label: 'synthesize', phase: 'Synthesize', schema: SYNTH_SCHEMA }
 )
 
+// ───────────────────────── runRecord：紧凑可落盘的一行元数据（T2 台账 + castMode 可见化）─────────────────────────
+// 聚合本次 run 的裁决/置信度分布，供调用侧 append 到 panel-runs.jsonl，让 fallback 率 / refute 率长期可观测。
+const _vstat = { HOLDS: 0, REFUTED: 0, UNVERIFIABLE: 0 }
+const _cstat = { HIGH: 0, MEDIUM: 0, LOW: 0, UNVERIFIED: 0 }
+for (const r of clean) {
+  for (const v of (r.verdicts || [])) if (v && v.verdict in _vstat) _vstat[v.verdict]++
+  for (const c of (r.out.claims || [])) if (c && c.confidence in _cstat) _cstat[c.confidence]++
+}
+// stopReason 在 synth 时按状态回推（避免在每个 break 处穿线）
+const stopReason = (MAX_ROUNDS === 1 && !(budget && budget.total)) ? 'single-round(no-budget)'
+  : (budget && budget.total && budget.remaining() < BUDGET_FLOOR) ? 'budget-floor'
+  : (round >= MAX_ROUNDS) ? 'max-rounds' : 'critic-complete'
+const runRecord = {
+  question: Q,
+  castMode,                    // explicit | selector | generic-optin（generic 现为显式 opt-in，无声 fallback 已废）
+  seedExperts: SEED_EXPERTS.length,
+  expertCount: clean.length,
+  evalMode: EVAL,
+  verifyVotes: VOTES,
+  depth: DEPTH,
+  budget: budget && budget.total ? budget.total : null,
+  rounds: round,
+  stopReason,
+  verdictStats: _vstat,        // HOLDS/REFUTED/UNVERIFIABLE 计数 —— 长期 refute 率监控
+  confidenceStats: _cstat,     // 专家 claim 的置信度分布 —— 监控 HIGH 通胀
+  killedCount: (synthesis && synthesis.killed || []).length,
+  tensionsCount: (synthesis && synthesis.tensions || []).length,
+  agreementsCount: (synthesis && synthesis.agreements || []).length,
+  tokensSpent: budget ? budget.spent() : null,
+}
+log(`runRecord: castMode=${castMode}｜rounds=${round}｜verdict=${JSON.stringify(_vstat)}｜killed=${runRecord.killedCount}｜stop=${stopReason}`)
+
 return {
   question: Q,
   rounds: round,
   expertCount: clean.length,
   tokensSpent: budget ? budget.spent() : null,
+  castMode,        // explicit | selector | generic-optin —— 调用侧可据此确认按题选人是否生效
+  runRecord,       // 调用侧 append 到 ~/Desktop/colar-memory/transcripts/panel-runs.jsonl
   synthesis,
   perExpert: digest,
 }
