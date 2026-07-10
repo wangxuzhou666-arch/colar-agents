@@ -115,3 +115,6 @@ integrations/openclaw/*
 integrations/qwen/agents/
 !integrations/openclaw/README.md
 .gstack/
+
+# per-session handoff 兜底落盘（chat 为主 + 落盘兜底，纯本地不进 git）
+.claude/handoffs/
