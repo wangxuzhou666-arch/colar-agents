@@ -11,6 +11,13 @@
 #   - 两处都读并合并：聚合仓 ~/Desktop/colar-memory/BACKLOG.md
 #     + 各机密 lane 项目内 <repo>/.claude/BACKLOG.local.md（不 push 的机密项）
 #   - 当前 lane 归属改前缀匹配：cwd 以某 lane 路径为前缀即命中（修子目录/裸 home 分裂）
+#
+# 2026-07-10 衰减与折叠升级（修开场注入 70+ 条污染 context）:
+#   - 解析 persist 落的 <!--t:YYYY-MM-DD--> last-touched 戳（显示时剥掉）
+#   - >COLD_DAYS(14) 天未触碰 → 不逐条注入,折叠成一行计数
+#   - 活跃项超 MAX_LIST(20) 条 → 只列前 20,余量折叠计数
+#   - dedup 与 persist 同款归一化 key（全角→半角+去空白）,防标点变体重复注入
+#   ⚠️ <!--t:--> 格式/_dedup_key 与 persist.sh 必须同步改
 set +e
 INPUT=$(head -c 65536)
 export BACKLOG="$HOME/Desktop/colar-memory/BACKLOG.md"
@@ -20,9 +27,19 @@ export HOOK_INPUT="$INPUT"
 # 聚合仓不存在也别急着退 —— 机密 lane 的 .local.md 可能仍有内容要注入
 
 python3 -c '
-import os, sys, json, signal, re, subprocess
+import os, sys, json, signal, re, subprocess, datetime
 signal.signal(signal.SIGALRM, lambda *a: sys.exit(0))
 signal.alarm(6)
+
+COLD_DAYS = 14   # 超过这个天数未触碰的项折叠成计数
+MAX_LIST  = 20   # 活跃项最多逐条注入这么多,余量折叠
+
+# 与 persist.sh 同款归一化（⚠️ 两处同步改;python 包在 bash 单引号里,禁用 ASCII 引号字符）
+_FW = str.maketrans("（）：，、；！？【】－～", "():,,;!?[]-~")
+def _dedup_key(s):
+    s = re.sub(r"<!--t:\d{4}-\d{2}-\d{2}-->", "", s or "")
+    s = s.translate(_FW)
+    return re.sub(r"\s+", "", s).casefold()
 
 try:
     d = json.loads(os.environ.get("HOOK_INPUT", "{}"))
@@ -150,9 +167,13 @@ for path, body, conf_source in tagged_secs:
         continue
     if is_current:
         for it in items:
-            if it not in seen:
-                seen.add(it)
-                cur_items.append(it)
+            k = _dedup_key(it)
+            if k in seen:
+                continue
+            seen.add(k)
+            dm = re.search(r"<!--t:(\d{4}-\d{2}-\d{2})-->", it)
+            display = re.sub(r"\s*<!--t:\d{4}-\d{2}-\d{2}-->", "", it).rstrip()
+            cur_items.append((display, dm.group(1) if dm else None))
     else:
         # 只有非机密（聚合仓）段才进 other 计数，语义保持不变
         nm = os.path.basename(key) if not key.startswith("misc:") else key
@@ -163,9 +184,30 @@ if not cur_items and not other:
 
 out = ["[backlog::hook-only] 跨 session 未完成任务(来自 BACKLOG.md,可能已过时,开工前快速核一眼):"]
 if cur_items:
+    # 冷/热分流:>COLD_DAYS 未触碰的折叠;活跃项超 MAX_LIST 也折叠
+    _today = datetime.date.today()
+    fresh, cold = [], []
+    for it, dstr in cur_items:
+        age = None
+        if dstr:
+            try:
+                age = (_today - datetime.date.fromisoformat(dstr)).days
+            except Exception:
+                age = None
+        (cold if (age is not None and age > COLD_DAYS) else fresh).append(it)
+    shown = fresh[:MAX_LIST]
+    overflow = len(fresh) - len(shown)
     out.append("■ 当前 project (" + cur_name + "):")
-    out.extend("  " + it for it in cur_items)
-    out.append("  → 开工前把上面这些 rebuild 进 TodoWrite;union-merge 下未 rebuild 的项会保留,但只有本 session 显式 completed 才移除")
+    out.extend("  " + it for it in shown)
+    folded = []
+    if overflow > 0:
+        folded.append(str(overflow) + " 条活跃项超出上限")
+    if cold:
+        folded.append(str(len(cold)) + " 条冷任务(>" + str(COLD_DAYS) + "天未触碰)")
+    if folded:
+        out.append("  … 已折叠: " + " + ".join(folded) + " → 全量见 BACKLOG.md 对应段;要捞哪条说一声")
+    if shown:
+        out.append("  → 开工前把上面这些 rebuild 进 TodoWrite;union-merge 下未 rebuild 的项会保留,但只有本 session 显式 completed 才移除")
 else:
     out.append("■ 当前 project (" + cur_name + "): 无 open 项")
 if other:

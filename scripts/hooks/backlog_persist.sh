@@ -15,6 +15,13 @@
 #   - lane 命中机密前缀 → 改道落项目内 <repo>/.claude/BACKLOG.local.md（不 push）
 #     未命中 → 照旧落聚合仓 ~/Desktop/colar-memory/BACKLOG.md（会 push）
 #   - lane 分裂修复：非 git 的 misc lane 也做前缀归并（git repo 早由 rev-parse 收敛到 root）
+#
+# 2026-07-10 衰减与去重升级（修 backlog 无限膨胀污染开场 context）:
+#   - dedup key 归一化：全角→半角标点 + 去空白 + casefold —— 同任务的标点变体不再重复累积
+#   - 每条尾部带 <!--t:YYYY-MM-DD--> last-touched 戳：本 session TodoWrite 出现过 → 刷成今天;
+#     未触碰 → 保留旧戳; 无戳(旧格式迁移) → 补今天
+#   - 冷任务折叠在 recall 侧做(>14 天未触碰 / 超量溢出),persist 只负责保真落盘
+#   ⚠️ <!--t:--> 格式与 recall.sh 的解析必须同步改
 set +e
 INPUT=$(head -c 262144)
 export BACKLOG="$HOME/Desktop/colar-memory/BACKLOG.md"
@@ -144,9 +151,18 @@ if last is None:
 
 def _norm(s):
     s = (s or "").strip().replace("\n", " ")
+    s = re.sub(r"<!--t:\d{4}-\d{2}-\d{2}-->", "", s)
     s = re.sub(r"\s*_\(in progress\)_\s*$", "", s)
     s = re.sub(r"\s+", " ", s)
-    return s
+    return s.strip()
+
+# dedup key 归一化：全角标点→半角 + 去全部空白 + casefold。
+# 修「同一条任务因（）：vs ():、有无空格而 dedup 失败无限累积」。
+# 注意:本段 python 包在 bash 单引号里,映射表禁用 ASCII 引号字符
+_FW = str.maketrans("（）：，、；！？【】－～", "():,,;!?[]-~")
+def _dedup_key(s):
+    s = _norm(s).translate(_FW)
+    return re.sub(r"\s+", "", s).casefold()
 
 session_open = [_norm(t.get("content")) for t in last
                 if isinstance(t, dict) and t.get("status") in ("pending", "in_progress")]
@@ -230,20 +246,30 @@ try:
     if not text.strip().startswith("# BACKLOG"):
         text = HEADER + "\n" + text
 
-    existing_open = []
+    existing_open = []  # [(content, last_touched | None)]
     m = re.search(r"<!-- project:" + re.escape(lane) + r" -->(.*?)<!-- /project -->", text, re.DOTALL)
     if m:
         for ln in m.group(1).splitlines():
             ln = ln.strip()
             if ln.startswith("- [ ]"):
-                existing_open.append(_norm(ln[len("- [ ]"):]))
+                raw = ln[len("- [ ]"):]
+                dm = re.search(r"<!--t:(\d{4}-\d{2}-\d{2})-->", raw)
+                existing_open.append((_norm(raw), dm.group(1) if dm else None))
 
-    merged, seen = [], set()
-    for item in existing_open + session_open:
-        if not item or item in session_done or item in seen:
+    session_open_keys = {_dedup_key(c) for c in session_open}
+    session_done_keys = {_dedup_key(c) for c in session_done}
+
+    merged, seen = [], set()  # merged: [(content, last_touched)]
+    for item, item_date in existing_open + [(c, None) for c in session_open]:
+        if not item:
             continue
-        seen.add(item)
-        merged.append(item)
+        k = _dedup_key(item)
+        if k in session_done_keys or k in seen:
+            continue
+        seen.add(k)
+        # 本 session 触碰过 → 刷成今天; 未触碰保留旧戳; 无戳(旧格式)补今天当首见
+        touched = today if (k in session_open_keys or item_date is None) else item_date
+        merged.append((item, touched))
 
     text = re.sub(r"\n*<!-- project:" + re.escape(lane) + r" -->.*?<!-- /project -->\n*", "\n", text, flags=re.DOTALL)
     text = re.sub(r"\n*<!-- last-persist:.*?-->\n*", "\n", text)
@@ -251,7 +277,7 @@ try:
     if merged:
         lines = [f"<!-- project:{lane} -->", f"## {name}", f"`{display_path}`",
                  f"_updated: {today} · session {sid8}_", ""]
-        lines += [f"- [ ] {c}" for c in merged]
+        lines += [f"- [ ] {c} <!--t:{d}-->" for c, d in merged]
         lines.append("<!-- /project -->")
         text = text.rstrip() + "\n\n" + "\n".join(lines) + "\n"
     else:
