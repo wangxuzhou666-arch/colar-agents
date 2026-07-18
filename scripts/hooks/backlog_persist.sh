@@ -56,7 +56,10 @@ def lane_key(path):
         r = subprocess.run(["git", "-C", path, "rev-parse", "--show-toplevel"],
                            capture_output=True, text=True, timeout=2)
         root = (r.stdout or "").strip()
-        if r.returncode == 0 and root:
+        # STEP2a(2026-07-17): git root 恰为 $HOME → 判 misc,不当 project lane。
+        #   裸 home 不是项目;若 ~ 某天被 git init 或嵌进某 repo,别把整个 home 当一个 lane 吞掉子项目。
+        #   ⚠️ 与 recall.sh:lane_key 同步改(两文件同一归属契约)。
+        if r.returncode == 0 and root and root != os.path.expanduser("~"):
             return root, os.path.basename(root), root
     except Exception:
         pass
@@ -259,7 +262,18 @@ try:
     session_open_keys = {_dedup_key(c) for c in session_open}
     session_done_keys = {_dedup_key(c) for c in session_done}
 
-    merged, seen = [], set()  # merged: [(content, last_touched)]
+    # STEP3a(2026-07-17): age-TTL 归档下架。超 ARCHIVE_TTL_DAYS 天未在任何 session TodoWrite 出现的项
+    #   → 从活跃段下架,写 BACKLOG.archive.md 墓碑(可 grep 可回滚),不静默删。本 session 触碰过的项永不归档。
+    #   归档按 <!--t:--> last-touched 日期为键(非 dedup_key)。当前存量全 <14 天,部署即时不下架任何项(纯未来 GC)。
+    ARCHIVE_TTL_DAYS = 45
+    today_d = datetime.date.fromisoformat(today)
+    def _age_days(dstr):
+        try:
+            return (today_d - datetime.date.fromisoformat(dstr)).days
+        except Exception:
+            return None  # 日期不可解析 → 保守当 fresh,不归档
+
+    merged, seen, archived = [], set(), []  # merged/archived: [(content, last_touched)]
     for item, item_date in existing_open + [(c, None) for c in session_open]:
         if not item:
             continue
@@ -269,7 +283,29 @@ try:
         seen.add(k)
         # 本 session 触碰过 → 刷成今天; 未触碰保留旧戳; 无戳(旧格式)补今天当首见
         touched = today if (k in session_open_keys or item_date is None) else item_date
+        # age-TTL:仅「本 session 未触碰」且「有戳且超 TTL」的项下架归档,其余照留
+        if k not in session_open_keys and item_date is not None:
+            age = _age_days(item_date)
+            if age is not None and age > ARCHIVE_TTL_DAYS:
+                archived.append((item, item_date))
+                continue
         merged.append((item, touched))
+
+    if archived:
+        archive_path = os.path.join(os.path.dirname(backlog), "BACKLOG.archive.md")
+        try:
+            new_file = not os.path.exists(archive_path)
+            with open(archive_path, "a", encoding="utf-8") as af:
+                if new_file:
+                    af.write("# BACKLOG.archive — age-TTL 下架墓碑(可回滚:把行复制回 BACKLOG.md 对应段)\n\n")
+                for c, dd in archived:
+                    af.write("- [ ] " + c + " <!--t:" + dd + "--> <!--archived:" + today + " lane:" + lane + "-->\n")
+        except Exception as e:
+            _plog("WARN", "archive write failed -> keep items: " + repr(e))
+            # 归档写失败 → 绝不丢数据:放回 merged 下次再试(no-silent-erasure)
+            for c, dd in archived:
+                merged.append((c, dd))
+            archived = []
 
     text = re.sub(r"\n*<!-- project:" + re.escape(lane) + r" -->.*?<!-- /project -->\n*", "\n", text, flags=re.DOTALL)
     text = re.sub(r"\n*<!-- last-persist:.*?-->\n*", "\n", text)
@@ -290,7 +326,7 @@ try:
     with open(tmp, "w", encoding="utf-8") as fh:
         fh.write(text)
     os.replace(tmp, backlog)
-    _plog("OK", "dest=" + dest_tag + " lane=" + lane + " merged=" + str(len(merged)) + " (open=" + str(len(session_open)) + " done=" + str(len(session_done)) + " prev=" + str(len(existing_open)) + ")")
+    _plog("OK", "dest=" + dest_tag + " lane=" + lane + " merged=" + str(len(merged)) + " arch=" + str(len(archived)) + " (open=" + str(len(session_open)) + " done=" + str(len(session_done)) + " prev=" + str(len(existing_open)) + ")")
 except Exception as e:
     _plog("FAIL", "dest=" + dest_tag + " lane=" + lane + " err=" + repr(e))
 finally:

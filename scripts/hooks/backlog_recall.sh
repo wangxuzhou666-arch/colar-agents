@@ -37,7 +37,13 @@ MAX_LIST  = 20   # 活跃项最多逐条注入这么多,余量折叠
 # 与 persist.sh 同款归一化（⚠️ 两处同步改;python 包在 bash 单引号里,禁用 ASCII 引号字符）
 _FW = str.maketrans("（）：，、；！？【】－～", "():,,;!?[]-~")
 def _dedup_key(s):
+    # STEP2c(2026-07-17): 与 persist.sh 的 _dedup_key(_norm(...)) 逐字节等价(已实证全量 237 项 0 mismatch)。
+    #   ⚠️ STEP3 provenance 要跨 recall/persist 比对同一 key,两侧归一化必须一致——改一侧必同步改另一侧。
+    #   对齐点:剥行首 checkbox(persist 只对 content 建 key,不含 "- [ ]") + strip _(in progress)_ + 空白折叠。
     s = re.sub(r"<!--t:\d{4}-\d{2}-\d{2}-->", "", s or "")
+    s = re.sub(r"^- \[[ xX]\]\s*", "", s.strip())        # 剥行首 checkbox
+    s = re.sub(r"\s*_\(in progress\)_\s*$", "", s)        # 对齐 persist._norm 的 in-progress strip
+    s = re.sub(r"\s+", " ", s).strip()                    # 对齐 persist._norm 的空白折叠
     s = s.translate(_FW)
     return re.sub(r"\s+", "", s).casefold()
 
@@ -52,7 +58,10 @@ def lane_key(path):
         r = subprocess.run(["git", "-C", path, "rev-parse", "--show-toplevel"],
                            capture_output=True, text=True, timeout=2)
         root = (r.stdout or "").strip()
-        if r.returncode == 0 and root:
+        # STEP2a(2026-07-17): git root 恰为 $HOME → 判 misc,不当 project lane。
+        #   裸 home 不是项目;若 ~ 某天被 git init 或嵌进某 repo,别把整个 home 当一个 lane 吞掉子项目。
+        #   ⚠️ 与 persist.sh:lane_key 同步改(两文件同一归属契约)。
+        if r.returncode == 0 and root and root != os.path.expanduser("~"):
             return root, os.path.basename(root)
     except Exception:
         pass
@@ -183,29 +192,85 @@ if not cur_items and not other:
     sys.exit(0)
 
 out = ["[backlog::hook-only] 跨 session 未完成任务(来自 BACKLOG.md,可能已过时,开工前快速核一眼):"]
+# STEP2b(2026-07-17,nudge-only): 裸 home(cwd==$HOME 非项目 repo)→ 本 session todos 会落 misc 杂项磁铁
+#   而非项目 lane。开场提示一句,在对的时机(开工前)nudge Colar cd 进项目。read-only,不动 persist 写路径。
+if cwd == os.path.expanduser("~"):
+    out.append("⚠️ 裸 home(非项目 repo):本 session 的 todos 会落 misc 杂项磁铁,不是项目 lane;如在做某项目请先 cd 进该 repo 再干活。")
 if cur_items:
     # 冷/热分流:>COLD_DAYS 未触碰的折叠;活跃项超 MAX_LIST 也折叠
+    # STEP1(2026-07-17): recency 排序(修 R9 最旧优先) + 分桶 round-robin(修 R3 单项目吃满槽) + 溢出写 sidecar(内容可恢复)
     _today = datetime.date.today()
+    _MIN = datetime.date(1, 1, 1)  # 无戳项排序兜底(沉底,不占最新槽位)
     fresh, cold = [], []
     for it, dstr in cur_items:
+        d = None
         age = None
         if dstr:
             try:
-                age = (_today - datetime.date.fromisoformat(dstr)).days
+                d = datetime.date.fromisoformat(dstr)
+                age = (_today - d).days
             except Exception:
-                age = None
-        (cold if (age is not None and age > COLD_DAYS) else fresh).append(it)
-    shown = fresh[:MAX_LIST]
+                d = None
+        (cold if (age is not None and age > COLD_DAYS) else fresh).append((it, d))
+
+    # R9 修复:按 last-touched 递减(最新在前),让开场浮现"今天在干的活"而非文件顺序里最旧的 20 条
+    fresh.sort(key=lambda x: x[1] or _MIN, reverse=True)
+
+    # R3 修复:按开头 [标签]/首词分桶,round-robin 跨桶挑,防单一子项目吃满全部 MAX_LIST 槽位
+    def _grp(text):
+        # 先剥掉行首 "- [ ]" checkbox,否则 [标签]/首词 正则被它挡住 → 全落一个桶,分桶失效
+        t = re.sub(r"^- \[[ xX]\]\s*", "", (text or "").strip())
+        m = re.match(r"\[([^\]]{1,24})\]", t)
+        if m:
+            return "[" + m.group(1).strip() + "]"
+        m2 = re.match(r"[\w./-]{2,20}", t)
+        return m2.group(0) if m2 else "未分组"
+
+    if len(fresh) <= MAX_LIST:
+        shown = list(fresh)
+    else:
+        groups = {}  # 保持插入序(fresh 已 recency 降序 → 含最新项的桶靠前)
+        for it, d in fresh:
+            groups.setdefault(_grp(it), []).append((it, d))
+        buckets = [list(v) for v in groups.values()]
+        shown = []
+        while len(shown) < MAX_LIST and any(buckets):
+            for b in buckets:
+                if b and len(shown) < MAX_LIST:
+                    shown.append(b.pop(0))
+            buckets = [b for b in buckets if b]
+        shown.sort(key=lambda x: x[1] or _MIN, reverse=True)  # 展平后仍按 recency 显示
+
     overflow = len(fresh) - len(shown)
     out.append("■ 当前 project (" + cur_name + "):")
-    out.extend("  " + it for it in shown)
+    out.extend("  " + it for it, _ in shown)
+
     folded = []
     if overflow > 0:
         folded.append(str(overflow) + " 条活跃项超出上限")
     if cold:
         folded.append(str(len(cold)) + " 条冷任务(>" + str(COLD_DAYS) + "天未触碰)")
     if folded:
-        out.append("  … 已折叠: " + " + ".join(folded) + " → 全量见 BACKLOG.md 对应段;要捞哪条说一声")
+        # 溢出/冷项全文写 sidecar:仅 ~/.claude 本地(不进 git,同 failclosed 兜底区),让被折叠内容可 Read 恢复而非只给计数
+        hint = " → 全量见 BACKLOG.md 对应段;要捞哪条说一声"
+        try:
+            sidecar = os.path.expanduser("~/.claude/backlog_overflow.txt")
+            slines = ["# backlog overflow — lane: " + cur_name + " — " + _today.isoformat(),
+                      "# 每次 SessionStart 覆盖写,仅本地(~/.claude,不进 git)。开场只注入前 " + str(len(shown)) + " 条,以下为全量。", "",
+                      "## 活跃(" + str(len(fresh)) + " 条,recency 降序):"]
+            for it, d in fresh:
+                slines.append(it + ("  <t:" + d.isoformat() + ">" if d else ""))  # it 已含行首 "- [ ]",不再加
+            if cold:
+                slines.append("")
+                slines.append("## 冷(>" + str(COLD_DAYS) + "天未触碰," + str(len(cold)) + " 条):")
+                for it, d in cold:
+                    slines.append(it + ("  <t:" + d.isoformat() + ">" if d else ""))
+            with open(sidecar, "w", encoding="utf-8") as sf:
+                sf.write("\n".join(slines) + "\n")
+            hint = " → 全量已写 " + sidecar + "(Read 它捞全部),或见 BACKLOG.md 对应段"
+        except Exception:
+            pass
+        out.append("  … 已折叠: " + " + ".join(folded) + hint)
     if shown:
         out.append("  → 开工前把上面这些 rebuild 进 TodoWrite;union-merge 下未 rebuild 的项会保留,但只有本 session 显式 completed 才移除")
 else:
