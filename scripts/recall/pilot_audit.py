@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Pilot skill attach-rate audit (2 周观察期).
+"""[DEPRECATED 2026-07-24] Pilot skill attach-rate audit (2 周观察期).
+
+⚠️ pilot「2 周试用期」机制已退役——3 个 pilot 裁决完毕(emoji 43% / max-mode 57% 转正,
+   nextjs-hmr 7% 优化 description 后转常规观察)。reflect Step 3 已改常规 attach 审计,
+   不再调用本脚本。保留仅作历史参考。
 
 每周手动跑: python3 pilot_audit.py
 对比基线 (2026-05-24 0%) 看 attach 率是否上升。

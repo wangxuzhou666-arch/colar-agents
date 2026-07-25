@@ -103,10 +103,7 @@ metadata:
 ## 快速开始
 
 ```bash
-# 1. 启动 Chrome
-python scripts/chrome_launcher.py
-
-# 2. 检查登录状态
+# 1. 检查登录状态（cli.py 首次调用会自动启动 bridge server + 打开 Chrome，无需手动启动）
 python scripts/cli.py check-login
 
 # 3. 登录（如需要）
@@ -139,6 +136,6 @@ python scripts/cli.py like-feed \
 ## 失败处理
 
 - **未登录**：提示用户执行登录流程（xhs-auth）。
-- **Chrome 未启动**：使用 `chrome_launcher.py` 启动浏览器。
+- **Chrome 未启动**：cli.py 首次调用会自动打开 Chrome；若仍未打开，确认已安装并启用 XHS Bridge 扩展。
 - **操作超时**：检查网络连接，适当增加等待时间。
 - **频率限制**：降低操作频率，增大间隔。
