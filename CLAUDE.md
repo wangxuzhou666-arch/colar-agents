@@ -26,11 +26,11 @@ act → /diff → commit
 ⑤ /diff（在 build 之前看，提前发现方向偏差）
 ⑥ build / test 验证
 ⑦ /review（code quality + 安全 + 逻辑）
-   ↳ 若本次改了**已覆盖 agent 的 prompt body** → 必跑 Agent Prompt-Edit Gate（before/after eval 对比，见上方专节）
+   ↳ 若本次改了**已覆盖 agent 的 prompt body** → 必跑 Agent Prompt-Edit Gate（before/after eval 对比，见下方同名专节 → skill `agent-prompt-edit-gate`）
 ⑧ save memory（非显而易见的决策） + SOUL drift check
-   ↳ 若本 session 产出可复用 procedure（稳定触发 + 可固化步骤）→ 跑 /capture-skill（层 3，带写时查重，见上方专节）
-   ↳ 若新 memory 否定/升级了 SOUL.md 某条声明，立即同步 SOUL（手动）
-   ↳ 想跑 drift 扫描：`bash ~/Desktop/agency-agents/scripts/drift-check.sh`（当前未自动接入 Stop hook）
+   ↳ 若本 session 产出可复用 procedure（稳定触发 + 可固化步骤）→ 跑 /capture-skill（层 3，带写时查重，见下方「收尾节点」）
+   ↳ 若新 memory 否定/升级了 SOUL.md 某条声明 → **升级类必须先提议 SOUL diff（旧 = … / 新 = …）等 Colar 拍板 (y/n)，不得自行改 SOUL**（权威版本：SOUL §「SOUL ↔ Memory Sync Discipline」#1）
+   ↳ drift 扫描：`memory_drift_check.sh` 已接 Stop hook 自动跑（advisory，clean 时静默）；SOUL 措辞黑名单扫描仍手动 `bash ~/Desktop/agency-agents/scripts/drift-check.sh`
 ⑨ commit
 ```
 
@@ -40,17 +40,17 @@ act → /diff → commit
 
 ```
 ① 加载 memory + 上下文（读 MEMORY.md + README + git log）
-② classify → delegate（过路由协议；Workflow Architect 编排 + 相关专项，并行 fan-out 上限 5 个）
+② classify → delegate（过路由协议选相关专项 agent，主 Claude 自任编排者，并行 fan-out 上限 5 个）
 ③ EnterPlanMode → 完整方案（含数据流/接口/风险/被排除方案）
 ④ 确认方案后 ExitPlanMode，开始执行
 ⑤ 每个子模块完成 → /diff → 小步 commit
 ⑥ build / test（每个 milestone 验证一次，不是最后才跑）
-   ↳ 若重构涉及**已覆盖 agent 的 prompt body** → 必跑 Agent Prompt-Edit Gate（before/after eval 对比，见上方专节）
+   ↳ 若重构涉及**已覆盖 agent 的 prompt body** → 必跑 Agent Prompt-Edit Gate（before/after eval 对比，见下方同名专节 → skill `agent-prompt-edit-gate`）
 ⑦ /review
 ⑧ save memory（关键架构决策的 trade-off + 被排除方案的原因） + SOUL drift check
-   ↳ 若本 session 产出可复用 procedure → 跑 /capture-skill（层 3 procedural capture，带写时查重，见上方专节）
-   ↳ 架构性变更尤其容易让 SOUL 过期 — 写完 memory 后立即同步 SOUL 受影响段落
-   ↳ 手动跑 `bash ~/Desktop/agency-agents/scripts/drift-check.sh`；改 SOUL 后反向 grep memory 列 deprecate 候选
+   ↳ 若本 session 产出可复用 procedure → 跑 /capture-skill（层 3 procedural capture，带写时查重，见下方「收尾节点」）
+   ↳ 架构性变更尤其容易让 SOUL 过期 — 发现受影响段落时**提议 SOUL diff 等 Colar 拍板 (y/n)，不得自行改**（权威版本：SOUL §「SOUL ↔ Memory Sync Discipline」#1）
+   ↳ `memory_drift_check.sh` 已接 Stop hook 自动跑；SOUL 黑名单扫描手动 `bash ~/Desktop/agency-agents/scripts/drift-check.sh`；改 SOUL 后反向 grep memory 列 deprecate 候选
 ⑨ PR
 ```
 
@@ -58,41 +58,9 @@ act → /diff → commit
 
 ## Agent Prompt-Edit Gate（改 agent prompt 必跑 eval）
 
-**凡改动 agent prompt body（master `.md` 的 frontmatter 之后正文），强制 before/after 跑 eval 对比 pass rate。** 这是层 4 eval 存在的唯一目的——别再盲改 prompt。改 frontmatter（routing metadata：`description` / `route-to-me-when` / `tools`）不触发（eval 只测 output 行为，不测路由）。
+**凡改动 agent prompt body（master `.md` frontmatter 之后正文），强制 before/after 跑 eval 对比 pass rate——别盲改。** 改 frontmatter（routing metadata）不触发。
 
-### 触发与动作
-
-| 改的是 | 动作 |
-|---|---|
-| **已覆盖 agent** 的 prompt body（`code-reviewer` / `senior-developer`） | **强制 gate**：改前跑 baseline → 改 → 再跑对比；pass rate 掉 or degradation-probe case 翻 FAIL = 这次改伤了 agent，回退或修 |
-| **未覆盖 agent** 的 prompt body（其余所有） | **无 eval 覆盖 = 盲改**。告知 Colar「{agent} 无 eval case，改 prompt 飞盲；要先补 4 个 case 再改吗？」按 SOUL ask-when-uncertain 处理 |
-
-### 命令（单 agent 迭代用 `--agent`，别跑全量 16 calls）
-
-```bash
-cd ~/Desktop/agency-agents
-bash eval/run-eval.sh --agent code-reviewer    # baseline，改 prompt 之前
-# ... 改 engineering/engineering-code-reviewer.md 正文 ...
-bash eval/run-eval.sh --agent code-reviewer    # after，对比 pass rate
-echo $?                                          # 0=全 pass，1=有 FAIL（可 gate CI）
-```
-
-### 铁律
-
-- **退出码判 pass/fail，别用管道**：`| tee` 让退出码取 tee（恒 0）掩盖 FAIL。要存 log 用 `bash eval/run-eval.sh 2>&1 | tee log.txt; exit ${PIPESTATUS[0]}`，否则裸跑 `; echo $?`。
-- **全量 ~16 Opus calls 有真实 token 成本**，改单 agent 只跑该 agent（`--agent`），smoke 用 `--case`。别随手跑全套。
-- **implementer 类（senior-developer）validity caveat**：纯 `claude -p` 无工具沙盒会让 implementer 退回"描述计划"而非贴代码；`sd-` 实现 case 已用「显式声明无工具→直接贴代码」修，degradation-probe `sd-no-architect-overreach` 两种环境都 valid。bare 实现 prompt 在此 FAIL 多半是环境错配不是 prompt 退化——别据此回退生产 prompt。
-- **master 是 symlink → 部署**，改 master 即时生效且 eval 读的就是 master，无需 sync。
-- **degradation-probe 用 majority-of-3，别信单跑**：probe case 的 verdict 受 agent 输出非确定性影响会偶发翻车（实测 `sd-no-architect-overreach` 同 prompt 单跑 PASS↔FAIL）。判 probe 通过/回归用 `--case <probe-id>` **跑 3 次取多数票**，单次 PASS/FAIL 不作数。普通 case 单跑即可。
-
-### 变异来源辨析（抖了先归因再动手）
-
-eval verdict 抖动有两个独立来源，**修法相反，先分清**：
-- **Judge 变异**（同一 agent 输出被打出不同分）→ 收紧 criteria 措辞（MUST/MUST NOT、concrete checkable）。
-- **Agent 变异**（agent 本身在边界 case 上时对时错，judge 各自打分都对）→ **不是 criteria 问题，是 prompt 弱点**，强化 agent 边界语言治本 + probe 用 majority-vote 防误判。
-- 辨别法：读多次 judge reasoning——描述的是**同一个输出**给不同分 = judge 变异；描述**不同输出** = agent 变异。
-
-详见 `eval/README.md`。覆盖面扩展（补 agent cases）见该 README「Adding a case」。
+完整流程（触发表 / `run-eval.sh --agent` 命令 / 四条铁律 / 变异来源辨析）见 skill `integrations/hermes/skills/agent-prompt-edit-gate/SKILL.md`（attach-on-demand，此处不复述全文）。
 
 ---
 
@@ -101,18 +69,16 @@ eval verdict 抖动有两个独立来源，**修法相反，先分清**：
 Agents 已按项目分层部署，Claude Code 自动发现，不需要手动指定：
 
 ```
-Tier 1: ~/.claude/agents/         ← 全局万能 agent，所有项目可用
-Tier 2: <project>/.claude/agents/ ← 按项目精选的专项 agent
-Master: ~/Desktop/agency-agents/  ← agent 源（不直接加载，通过 sync 脚本分发）
+Tier 1: ~/.claude/agents/         ← 全局 agent，所有项目可用（symlink → master，手动 ln -s 管理）
+Tier 2: <project>/.claude/agents/ ← 按项目精选的专项 agent（sync 脚本从 master 复制）
+Master: ~/Desktop/agency-agents/  ← 单一真相源（全局走 symlink、项目走 sync 复制）
 ```
 
 > 数量随项目演化变化，不在此处固定声明。当前快照：`ls ~/.claude/agents/ | wc -l`。
 
-**同步方式**：每个项目的 `.claude/agent-config.yaml` 声明需要哪些 agent，运行 `bash scripts/sync-all.sh` 从 master library 复制到项目的 `.claude/agents/`。
+**全局 agent（Tier 1）机制**：`~/.claude/agents/*.md` 是指向 master 的 **symlink**，手动创建：`ln -s ~/Desktop/agency-agents/<domain>/<file>.md ~/.claude/agents/<file>.md`。**只编辑 master 文件**——symlink 让改动即时对 Claude Code 生效；绝不在 `~/.claude/agents/` 放非 symlink 文件（破坏单一真相源）。
 
-**新增 agent 到项目**：编辑项目的 `.claude/agent-config.yaml`，然后运行 `bash ~/Desktop/agency-agents/scripts/sync-agents.sh <project-path>`。
-
-**不要手动往 `~/.claude/agents/` 或 `.claude/agents/` 放文件**——用 sync 脚本管理，保持单一真相源。
+**项目 agent（Tier 2）机制**：项目的 `.claude/agent-config.yaml` 声明需要哪些 agent，运行 `bash scripts/sync-all.sh` 从 master library 复制到项目的 `.claude/agents/`；新增单项目：编辑该项目 `agent-config.yaml` 后跑 `bash ~/Desktop/agency-agents/scripts/sync-agents.sh <project-path>`。**不要手动往项目 `.claude/agents/` 放文件**——项目层用 sync 脚本管理。
 
 ---
 
@@ -130,7 +96,7 @@ Master: ~/Desktop/agency-agents/  ← agent 源（不直接加载，通过 sync 
 3. **判断委派 vs 自己干**（见下方"何时不委派"）。
 4. **委派** — 经 Agent tool 调用选中的 agent；多个独立子任务时默认并行（见下方 fan-out 判据）。
 
-> ⚠️ router ≠ supervisor。这里只做"分类 → 选 → 委派"一次性决策，不引入持久编排状态机。需要跨多步协调时，那是 Tier 3 的 Workflow Architect 的活，不是 router 的活。
+> ⚠️ router ≠ supervisor。这里只做"分类 → 选 → 委派"一次性决策，不引入持久编排状态机。需要跨多步协调时，那是 Tier 3 编排（主 Claude 自任编排者，或 `/expert-panel` 类 workflow）的活，不是 router 的活。
 
 ### 路由歧义裁决（两个 agent 都像）
 
@@ -197,9 +163,9 @@ Master: ~/Desktop/agency-agents/  ← agent 源（不直接加载，通过 sync 
 
 | 任务类型 | 怎么选 |
 |---------|--------|
-| 一般工程 | 自动 — Tier 1 的 Software Architect / Senior Dev / Code Reviewer 覆盖 |
-| 安全审计 | `/cso` 或项目已部署的 Security Engineer |
-| 方案设计 / 架构 | Workflow Architect（Tier 1 自带） |
+| 一般工程 | 自动 — Tier 1 的 Senior Developer / Code Reviewer 覆盖 |
+| 架构 / 方案设计 | 内置 `Plan` agent 或 EnterPlanMode（2026-08-04 起 Software Architect 已退役，与内置 Plan 重合）；需多视角对抗走 `/expert-panel` |
+| 安全审计 | 内置 `/security-review` skill（2026-08-04 起 Security Engineer agent 已退役）；威胁建模等重判断走 `/expert-panel` 挂安全席位 |
 | **UI/UX 设计** | **走下方 UI/UX Pipeline（必经 Design Bridge；视觉/UI 执行走 skill 方案，主 loop 直接处理）** |
 | 专项领域 | 项目的 `.claude/agents/` 里已部署的专项 agent |
 | 多领域交叉 | 按 **默认 Fan-out 判据** 并行，常规 ≤3、上限 5 |
@@ -208,40 +174,11 @@ Master: ~/Desktop/agency-agents/  ← agent 源（不直接加载，通过 sync 
 
 ## UI/UX Design Pipeline（所有界面设计任务必走此流程）
 
-凡涉及 UI 设计、视觉风格、组件库、CSS 架构、交互模式的任务，**不要用通用 agent 凑**，走以下 pipeline：
+**触发**：用户说"设计 / UI / 界面 / 样式 / 风格" · 新建前端项目或页面 · 重构已有界面 · 提到任何品牌名作为视觉参考。命中即走 pipeline，**不要用通用 agent 凑**。
 
-```
-① Design Bridge（前置，必经）— 两种模式二选一
-   ├── Replication（对标现成品牌）：确定目标品牌 → fetch DESIGN.md → 输出 instructions-{brand}.md
-   └── Genesis（原创产品创世，原创项目推荐）：客户画像 + 调性 + 品类 + N 个灵感参考
-       → 合成原创自洽 DESIGN.md → 输出 instructions-genesis-{project}.md
-   ↓
-② 设计执行 — skill 方案，主 loop 直接处理（不再路由给专门 design agent）
-   ├── frontend-design plugin（Anthropic 官方）→ 组件设计、设计系统、视觉规范
-   ├── ui-ux-pro-max skill → CSS 架构、layout 框架、响应式策略
-   └── UX Researcher agent   → 用户调研、可用性测试（如有需要，仍走 agent）
-   ↓
-③ Frontend Developer → 实现落地
-   ↓
-④ /diff → build → /review
-```
+**四段**：Design Bridge（门卫，必经，Replication 复刻 / Genesis 创世 二选一）→ frontend-design plugin 执行 → Frontend Developer 落地 → `/diff` → build → `/review`。
 
-> 2026-07-04 起 UI Designer / UX Architect 两个 design agent 已退役，视觉与 CSS 架构职能由上述 skill 方案接管。Design Bridge 的门卫地位不变，产出的 instructions 由主 loop（带 skill）+ Frontend Developer 消费。
-
-### 触发条件（满足任一即走此 pipeline）
-
-- 用户说"设计"、"UI"、"界面"、"样式"、"风格"
-- 新建前端项目或页面
-- 重构/重新设计已有界面
-- 用户提到任何品牌名作为视觉参考（如"像 Linear 那样"）
-
-### Design Bridge 是门卫
-
-- **不跳过**：即使是"简单改个按钮颜色"，也先检查有没有已存在的 design spec
-- **两种模式**：
-  - **Replication（复刻）** — 对标现成品牌，66 品牌可选（Claude, Linear, Vercel, Stripe, Notion, Figma, Apple, Spotify 等），忠实还原单一来源 → 输出 `instructions-{brand}.md`
-  - **Genesis（创世）** — 原创产品没有现成品牌可抄时，吃客户画像 + 调性 + 品类 + N 个灵感参考，**合成一套项目专属、自洽的原创 DESIGN.md** → 输出 `instructions-genesis-{project}.md`（保留 `instructions-` 前缀让 consumer 的 glob 仍命中，加 `genesis-` 区分原创 vs 复刻）。同样 9-section 格式，只是来源从"抄单一品牌"变成"从多灵感合成原创"
-- **用户没指定品牌时**：主动给三条路 —— ① 对标现成品牌（Replication）② 为原创产品创造品牌（Genesis，**原创项目推荐默认**）③ 自己定（generic fallback）。**不要把原创新产品硬塞进一个不相干的现成品牌**，那是旧 pipeline 的烂路。
+完整流程（两种模式判据 / 66 品牌 / Genesis 产出格式 / 「没指定品牌时给三条路，别把原创产品硬塞现成品牌」）见 skill `integrations/hermes/skills/ui-design-pipeline/SKILL.md`（attach-on-demand，此处不复述全文）。
 
 ---
 
@@ -253,40 +190,12 @@ Master: ~/Desktop/agency-agents/  ← agent 源（不直接加载，通过 sync 
 
 ---
 
-## Memory Save 节点（Tier 2/3 结束时）
+## 收尾节点（Tier 2/3 结束时）— semantic 与 procedural 分开走
 
-只存非显而易见的内容：
-- 被排除的方案及原因
-- 关键架构决策的 trade-off
-- 下次 session 需要继承的上下文
-
-不存：代码模式、文件路径、git 历史（这些直接读代码）。
-
-## Procedural Capture 节点（Tier 2/3 结束时，与 save memory 并列）
-
-save memory 处理 **semantic**（事实 / 决策）；**若本 session 还产出了「可复用 procedure」** → 跑 `/capture-skill` 蒸馏成层 3 **procedural** skill（attach-on-demand 的 SKILL.md）。两者是不同 memory 型，分开走。
-
-- **判据**：skill = "当 X 触发 → 照 Procedure 走"；说不出稳定触发条件的不是 skill（是一次性操作，丢弃）。
-- **主动遗忘 > 无脑累积**（Colar 纪律）：宁可不 capture，不攒垃圾 skill。`/capture-skill` 的 Step 0「值得 gate」+ Step 2「写时 4-类查重」就是防累积腐烂。
-- **不会重复堆叠**：写时查重（重复跳过 / 升级改旧 / 细化加 pointer / 正交新建），命中「升级」停等拍板。
-- **落盘后由 `/ship` 提交**（skill 住本 repo，version-controlled）；命令自身不 commit。
-- 索引：`integrations/hermes/skills/SKILLS.md`（权威工作索引）。
-
-## SOUL ↔ Memory Sync（每次 save memory 时检查）
-
-SOUL.md 持有的是稳定 axioms（voice/boundaries/math 规则等），所有易变事实和演进型 framework 全部住在 Memory。两者会自然漂移，三条护栏：
-
-1. **写 memory 时（语义最热）**：新 memory 是否否定/升级了 SOUL 某段？是 → 立即手动同步 SOUL。
-2. **手动跑 drift 扫描**：`bash ~/Desktop/agency-agents/scripts/drift-check.sh` 扫黑名单 + 失效路径，命中输出 advisory（不阻断）。当前 Stop hook 用于 git sync 提醒，未接 drift-check —— 想自动化需手动加进 settings.json。
-3. **改 SOUL 时**：反向 `grep -l <旧措辞> ~/.claude/projects/.../memory/feedback_*.md` 列出该 deprecate 的 memory 文件。
-
-详细规则见 memory `feedback_soul_drift_session_close.md`。SOUL 维护参见 `soul/SOUL.md`、`soul/drift-blacklist.txt`、`soul/drift-whitelist.txt`。
-
----
-
-## 语言
-
-默认用中文回答。除非用户明确指定用英文，否则所有回复、解释、方案输出均使用中文。
+- **save memory**（semantic：事实 / 决策）— 只存非显而易见的：被排除的方案及原因 · 关键架构决策的 trade-off · 下次 session 需继承的上下文。**不存**代码模式 / 文件路径 / git 历史（直接读代码）。流程走 `/save-memory`。
+- **`/capture-skill`**（procedural：可复用打法）— 判据是"当 X 触发 → 照 Procedure 走"，说不出稳定触发条件的不是 skill。**主动遗忘 > 无脑累积**，宁可不 capture 也别攒垃圾。写时 4-类查重由命令自身负责。索引：`integrations/hermes/skills/SKILLS.md`（权威）。落盘后由 `/ship` 提交，命令自身不 commit。
+- **SOUL ↔ Memory Sync** — 新 memory 若否定/升级 SOUL 某段，**升级类必须先提议 SOUL diff 等 Colar 拍板 (y/n)，不得自行改 SOUL**。权威版本（4-类关系判断表）在 SOUL §「SOUL ↔ Memory Sync Discipline」，已常驻，此处不复述。drift 扫描：`memory_drift_check.sh` 已接 Stop hook 自动跑；`scripts/drift-check.sh`（SOUL 黑名单措辞 + 失效路径）仍手动。改 SOUL 后反向 `grep -l <旧措辞>` memory 列 deprecate 候选。
+- 延伸：memory `feedback_soul_drift_session_close.md` · `soul/SOUL.md` · `soul/drift-blacklist.txt` · `soul/drift-whitelist.txt`
 
 ---
 
