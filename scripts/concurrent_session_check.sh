@@ -3,14 +3,14 @@
 # 并把「活跃 claude session」和「僵尸 dev server」区分开。
 #
 # 背景（为什么存在）：
-#   织锦（fabric-agent-demo）出现过「脏树雪球」——session 误判「以为有活跃并发 session
+#   实战中出现过「脏树雪球」——session 误判「以为有活跃并发 session
 #   所以不敢 commit」，但实际那些 next/uvicorn 进程是挂了很多天的僵尸，根本没有活跃并发。
 #   误判 → 无限 defer → 脏树累积。本脚本掐断这个放大器：用可信信号回答「现在到底有没有
 #   别的 claude session 可能在这个 repo 上干活」，并诚实标注置信度（宁可报「疑似」也不误报
 #   「确定无并发」）。
 #
 # 用法：
-#   bash concurrent_session_check.sh [REPO_PATH]        # 人读报告（默认 REPO=织锦）
+#   bash concurrent_session_check.sh [REPO_PATH]        # 人读报告（默认 REPO=当前 git 树）
 #   bash concurrent_session_check.sh --brief [REPO]     # 只输出机器可解析的 VERDICT= 行（供 hook 消费）
 #   REPO=<path> ACTIVE_WINDOW_MIN=20 ZOMBIE_HOURS=6 bash concurrent_session_check.sh
 #
@@ -35,7 +35,8 @@
 
 set -u
 
-REPO_DEFAULT="/Users/colar/Desktop/创业/fabric-agent-demo"
+# 默认取当前 cwd 所在的 git 树根，不硬编码具体项目路径（本脚本对所有 repo 通用）
+REPO_DEFAULT="$(git rev-parse --show-toplevel 2>/dev/null)"
 BRIEF=0
 ARG_REPO=""
 for a in "$@"; do

@@ -5,7 +5,7 @@ argument-hint: "[slug，描述本次主题，可选]"
 
 # /handoff — Session 交接生成器（chat 为主 + per-session 兜底）
 
-中断当前 session 前调用，产出**一个自包含的交接块进对话（一键粘即恢复）+ 一份 per-session 兜底落盘**。目标：Colar 整块复制进下个 session，一打开就知道 (a) 在哪儿 (b) 上次干到哪 (c) 下一步怎么走 (d) 有什么坑。设计取舍的完整 why、以及 chat-only ↔ 落盘 的历次反转轨迹见 `~/Desktop/agency-agents/docs/handoff_design_rationale.md`（本文件只留指令）。消费端配套命令：`/resume`。
+中断当前 session 前调用，产出**一个自包含的交接块进对话（一键粘即恢复）+ 一份 per-session 兜底落盘**。目标：Colar 整块复制进下个 session，一打开就知道 (a) 在哪儿 (b) 上次干到哪 (c) 下一步怎么走 (d) 有什么坑。设计取舍的完整 why、以及 chat-only ↔ 落盘 的历次反转轨迹见 `~/Desktop/colar-agents/docs/handoff_design_rationale.md`（本文件只留指令）。消费端配套命令：`/resume`。
 
 > **为什么 chat-first + per-session 兜底（2026-07-10 修订）**：并发失效模式的根因是**共享单文件**（`LATEST.md` 被多 session 抢写、后写覆盖先写、degraded 脏数据盖健康版），**不是持久化本身**。所以杀「共享」而非杀「文件」：交接块仍以 chat 为主传输（一键粘、无共享文件、无 split-brain），**同时**每个 session 写自己的 `.claude/handoffs/<session_id>.md`（gitignored、纯本地、per-session 文件名 → 两 session 永不写同一文件 → 并发覆盖物理上不可能）做 durability floor。这样「session 没来得及 /handoff 就死了 / 忘复制」不再等于全损（mental model + why 是全块最不可从 git 重建的部分，不能只押在易失的 chat scrollback 上）。禁的是**共享文件与 symlink，不是落盘**。
 
@@ -28,7 +28,7 @@ wc -l .env.local 2>/dev/null                                        # env 行数
 
 外加从对话上下文提取：TodoWrite state / 最近 3 个 commit message / 本 session 关键决策 + why / 踩过的坑。
 
-> 🚑 **采集异常（Bash 不可用 / 输出可疑）或怀疑 confabulation（安全/危机类 claim）时**：停用正常采集，读 `~/Desktop/agency-agents/commands/handoff-recovery.md` 走 degraded 采集 + Confab Gate 协议。
+> 🚑 **采集异常（Bash 不可用 / 输出可疑）或怀疑 confabulation（安全/危机类 claim）时**：停用正常采集，读 `~/Desktop/colar-agents/commands/handoff-recovery.md` 走 degraded 采集 + Confab Gate 协议。
 
 ## Step 2：组织交接块（chat 为主 + per-session 兜底，一个自包含 fenced 块）
 
@@ -58,7 +58,7 @@ expected_outputs: ["29/29 rule-engine pass"]
 default_path: severity_calibration_base    # DEFAULT_ACTION 的 slug；AI 无 Colar 在场时走这个（无 default 等于无门）
 alt_paths: [severity_calibration_floor, severity_calibration_optimal]
 blockers: ["dev server PID 17383 可能 stale，开始前 lsof verify"]
-expired_items: [{ item: "Workplay ≥10 真用户 KPI", expired_on: "2026-05-25", action: "需复盘 or 移除" }]
+expired_items: [{ item: "<某项到期的 KPI/承诺>", expired_on: "2026-05-25", action: "需复盘 or 移除" }]
 # security_alert: 仅当存在安全/危机 claim；必须留在此块顶部；格式与 Confab Gate 规则见 handoff-recovery.md
 ---
 # ---- 精简关键段（自包含，块内直接读，不跳转外部文件）----
@@ -109,7 +109,7 @@ Mental model（此刻继续要装回脑里的核心抽象，几行压清；这�
 | `security_alert`（若存在） | 必在块顶，不下沉，否则返工 | 同 normal |
 
 - ✅ 校验通过 → 标签升级 `[bash-derived]` / `[verified-oob]`；❌ 不通过 → 删或降级 `[unverified]`，不准冒充事实
-- **secret-gate**：交接块虽不进 git，但会进下个 session 的上下文、且会落一份本地文件（Step 4）——所有写入内容（含誊抄的 commit message、文件名、带外回贴）跑 `bash ~/Desktop/agency-agents/scripts/secret-gate.sh` 扫一遍，命中即 redact 占位符。
+- **secret-gate**：交接块虽不进 git，但会进下个 session 的上下文、且会落一份本地文件（Step 4）——所有写入内容（含誊抄的 commit message、文件名、带外回贴）跑 `bash ~/Desktop/colar-agents/scripts/secret-gate.sh` 扫一遍，命中即 redact 占位符。
 
 ## Step 4：per-session 兜底落盘（durability floor，不可跳过）
 

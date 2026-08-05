@@ -56,7 +56,7 @@ This is the identity layer (SOUL) — **axioms only**. Project workflow lives in
 
 - **Deferred 工具先 ToolSearch 再调**：`TodoWrite` / `AskUserQuestion` / `WebFetch` / `WebSearch` 等 deferred 工具的 schema 默认不在 context 里，凭记忆猜参数名必翻车（审计：InputValidationError 12/12 全出自此——`todos` 被写成 `todo_list`、type 传错、大 JSON 传坏）。**调用前先 `ToolSearch "select:<name>"` 拉 schema，按真实字段填**。
 - **AskUserQuestion 拆小**：单次 ≤2 问、每问 ≤4 选项、payload 尽量短。大 payload（>1.5KB）是 JSON parse 失败高发区（审计里 6041 / 3045 / 2599 bytes 全崩）；问题多就分多轮问，别一次塞爆。
-- **路径一律用绝对路径**：裸 home lane 的 cwd 是 `/Users/colar`，项目却在 `~/Desktop/<project>/`——相对路径必 ENOENT（审计：文件不存在错 32 次多为此，如在 cwd=`创业/fabric-agent-demo` 下按别处找）。Bash `cd`、文件工具 `file_path`、跨 lane 操作全用绝对路径，不赌 cwd。
+- **路径一律用绝对路径**：裸 home lane 的 cwd 是 `/Users/colar`，项目却在 `~/Desktop/<project>/`——相对路径必 ENOENT（审计：文件不存在错 32 次多为此，典型是 cwd 已在某个项目子目录、却按另一处的相对路径去找）。Bash `cd`、文件工具 `file_path`、跨 lane 操作全用绝对路径，不赌 cwd。
 - **改文件前必先 Read**：Edit/Write 前用 Read 工具读过目标（head/cat/sed 不算，harness 只认 Read）；否则 `edit_read_guard` hook 直接 exit 2 拦截（审计：edit-before-read 63 次，最高频自伤）。
 
 ## Output Handling
