@@ -50,10 +50,19 @@ const MAX_ROUNDS = (A && A.maxRounds)
 const hasExplicitExperts = !!(A && Array.isArray(A.experts) && A.experts.length)
 const ROSTER = (A && Array.isArray(A.agentRoster) && A.agentRoster.length) ? A.agentRoster : null
 const GENERIC_PANEL = [
-  { agentType: 'Trend Researcher',     lens: '市场/竞品/外部真实验证 — 有没有人已经做、为什么没成' },
-  { agentType: 'Product Manager',      lens: '用户 JTBD、真实需求强度、distribution 现实' },
-  { agentType: 'Software Architect',   lens: '实现复杂度、技术风险、最小可行路径' },
-  { agentType: 'Security Engineer',    lens: '隐私/安全/凭证/数据暴露面' },
+  // 2026-08-05：本盘四席全面去 agentType 化，只留一个确定存在的内置 agent。起因是三个死名——
+  // Software Architect / Security Engineer（2026-08-04 退役）+ Trend Researcher（master 库有
+  // product/product-trend-researcher.md，但从未部署到 ~/.claude/agents/、也未 sync 进任何 project
+  // ⟹ 库存 ≠ 可调用，正是 CLAUDE.md 路由协议警告的 INDEX.md 陷阱）。非法 agentType 会让 agent()
+  // 直接崩而非静默降级，所以这个默认盘一旦被走到（generic:true）就是整轮白跑。
+  // 修法：除内置 Plan 外一律用 role 走通用 subagent prompt 扮演——role 无注册表依赖，agent 退役
+  // 不会再把它打崩；lens 全部原样保留，专家视角不变。
+  // 核 agent 名请看**系统注入的 available agent types**（运行时真相源），不是 ls ~/.claude/agents/
+  // （那只列自定义 agent，看不到 Plan/Explore/general-purpose 等内置项），更不是 agents/INDEX.md。
+  { role: 'Trend Researcher',          lens: '市场/竞品/外部真实验证 — 有没有人已经做、为什么没成' },
+  { role: 'Product Manager',           lens: '用户 JTBD、真实需求强度、distribution 现实' },
+  { agentType: 'Plan',                 lens: '实现复杂度、技术风险、最小可行路径' },
+  { role: 'Security Engineer',         lens: '隐私/安全/凭证/数据暴露面' },
 ]
 
 // ───────────────────────── 质量门控（焊进每个专家 prompt）─────────────────────────
