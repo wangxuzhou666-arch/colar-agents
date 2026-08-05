@@ -25,18 +25,28 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 CASES_DIR="$SCRIPT_DIR/cases"
 JUDGE_PROMPT_FILE="$SCRIPT_DIR/judge-prompt.md"
-MODEL="claude-opus-4-8"
+# Must track the model the agents actually run on in production: agent frontmatter
+# says `model: opus`, which resolves to the current Opus. Evaluating on an older
+# Opus measures a model Colar no longer uses. (2026-08-04: claude-opus-4-8 -> claude-opus-5;
+# pass rates from before this date are NOT comparable — baseline was rebuilt.)
+MODEL="claude-opus-5"
 
 # Map agent slug -> master .md file (relative to repo root).
+# Keep this in sync with the deployed roster (~/.claude/agents/) — an agent with
+# no entry here has NO eval coverage, i.e. its prompt is edited blind.
 agent_file() {
   case "$1" in
-    code-reviewer)    echo "$REPO_ROOT/engineering/engineering-code-reviewer.md" ;;
-    senior-developer) echo "$REPO_ROOT/engineering/engineering-senior-developer.md" ;;
+    code-reviewer)      echo "$REPO_ROOT/engineering/engineering-code-reviewer.md" ;;
+    senior-developer)   echo "$REPO_ROOT/engineering/engineering-senior-developer.md" ;;
+    agent-infra)        echo "$REPO_ROOT/engineering/engineering-agent-infra.md" ;;
+    applied-ai)         echo "$REPO_ROOT/engineering/engineering-applied-ai.md" ;;
+    frontend-developer) echo "$REPO_ROOT/engineering/engineering-frontend-developer.md" ;;
+    vc-critic)          echo "$REPO_ROOT/specialized/idea-vc-critic.md" ;;
     *) echo "" ;;
   esac
 }
 
-ALL_AGENTS=(code-reviewer senior-developer)
+ALL_AGENTS=(code-reviewer senior-developer agent-infra applied-ai frontend-developer vc-critic)
 
 # ---------------------------------------------------------------------------
 # Arg parsing
@@ -103,8 +113,16 @@ run_claude() {
   local prompt="$1" sp_file="$2" raw result
   # </dev/null: prevent claude from blocking on / consuming the loop's stdin
   # (the case-file fed into the `while read` loop).
+  # --tools "": run the agent with NO tools. This is a HARD SAFETY REQUIREMENT,
+  # not an optimization. Without it `claude -p` inherits full Write/Edit/Bash
+  # access and an action-shaped case ("create a new agent and deploy it") makes
+  # the agent mutate the REAL system — on 2026-08-04 an eval run created a live
+  # agent file + symlink and edited a sibling agent's description before this was
+  # caught. Whitelist (fail-closed) is deliberate: a blocklist would silently let
+  # a newly added mutating tool through. Never remove this flag.
   raw="$(claude -p "$prompt" \
             --system-prompt-file "$sp_file" \
+            --tools "" \
             --output-format json \
             --model "$MODEL" </dev/null 2>/dev/null)" || return 1
   result="$(printf '%s' "$raw" | extract_result)" || return 1
@@ -130,6 +148,7 @@ EOF
   for attempt in 1 2; do
     raw="$(claude -p "$judge_input" \
               --system-prompt-file "$JUDGE_PROMPT_FILE" \
+              --tools "" \
               --output-format json \
               --model "$MODEL" </dev/null 2>/dev/null)" || { continue; }
     # Outer claude envelope -> .result holds the judge's text (control-char safe).

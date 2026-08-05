@@ -12,18 +12,47 @@ and compare pass rates — if a change regresses an agent, a case flips to FAIL.
 Output quality only (golden input → run agent → judge scores against criteria).
 It does **not** test routing/description quality — that's a separate concern.
 
-Two agents, 4 golden cases each:
+**All 6 deployed agents are covered** (2026-08-04 — was 2/6 before; the other four
+were being edited blind). 3 capability cases + 1 degradation probe each, except
+VC Critic (see its caveat below):
 
 | Agent | Master file | Cases |
 |---|---|---|
 | Code Reviewer | `engineering/engineering-code-reviewer.md` | `cases/code-reviewer.jsonl` (4) |
 | Senior Developer | `engineering/engineering-senior-developer.md` | `cases/senior-developer.jsonl` (4) |
+| Agent Infra Engineer | `engineering/engineering-agent-infra.md` | `cases/agent-infra.jsonl` (4) |
+| Applied AI Engineer | `engineering/engineering-applied-ai.md` | `cases/applied-ai.jsonl` (4) |
+| Frontend Developer | `engineering/engineering-frontend-developer.md` | `cases/frontend-developer.jsonl` (4) |
+| VC 模型 Critic | `specialized/idea-vc-critic.md` | `cases/vc-critic.jsonl` (2, discipline only) |
+
+Every criterion is derived from the agent's OWN stated contract (its Critical
+Rules / route-to-me-when exclusions), not from invented preferences — so a FAIL
+means the agent broke a rule it declares for itself, which is checkable rather
+than a matter of taste.
+
+`agent_file()` in `run-eval.sh` is the coverage registry: **an agent with no entry
+there has no eval coverage and its prompt is edited blind.** Keep it in sync with
+the deployed roster in `~/.claude/agents/`.
 
 > 2026-07-04: UI Designer retired (design work moved to the skill-based stack:
-> frontend-design plugin + ui-ux-pro-max); its cases were removed with it.
+> frontend-design plugin); its cases were removed with it.
+> 2026-08-04: `ui-ux-pro-max` skill removed (conflicted with frontend-design +
+> dataviz on the same trigger); Software Architect / Security Engineer / Trend
+> Researcher agents retired. Degradation-probe criteria no longer name a specific
+> destination agent — they test the BEHAVIOUR (does it refuse to overstep?), so a
+> future roster change can't silently invalidate a probe.
 
-Each agent has one **degradation-probe** case (a scope-boundary test) designed to
-flip to FAIL first if the prompt's boundary language gets damaged.
+Each agent has at least one **degradation-probe** case (a scope-boundary test)
+designed to flip to FAIL first if the prompt's boundary language gets damaged.
+
+> ⚠️ **Validity caveat — VC Critic gets discipline cases only.** Its boot sequence
+> requires *reading* the versioned framework MANIFEST + spec from disk, which this
+> harness (plain `claude -p`, no tools) cannot provide. Capability cases would
+> therefore measure nothing real. What IS measurable single-shot is its two red
+> lines: refusing to start when the spec is unreadable (instead of reconstructing
+> a stale framework from memory), and refusing web research under CONFIDENTIAL
+> mode. Those are the two cases. Do not "fix" the count to 4 by inventing
+> capability cases the harness cannot honestly run.
 
 ## How it works
 
@@ -38,7 +67,7 @@ flip to FAIL first if the prompt's boundary language gets damaged.
 ## Usage
 
 ```bash
-cd ~/Desktop/agency-agents
+cd ~/Desktop/colar-agents
 
 bash eval/run-eval.sh                                   # all covered agents (~16 claude calls)
 bash eval/run-eval.sh --agent code-reviewer             # one agent only (cheaper)
@@ -75,9 +104,22 @@ the agent. **Exit code 0 = all pass, 1 = at least one FAIL** — so it can gate 
 > bash eval/run-eval.sh 2>&1 | tee log.txt; exit ${PIPESTATUS[0]}
 > ```
 
+> 🚨 **Tool isolation is enforced by `--tools ""`, and it must stay.** Both the
+> agent call and the judge call in `run-eval.sh` pass `--tools ""`. Until
+> 2026-08-04 they did not, and this README wrongly asserted the harness had "no
+> tools" — `claude -p` actually inherits full Write/Edit/Bash access. A run of the
+> then-new `ai-new-agent-symlink-discipline` case made Agent Infra Engineer
+> genuinely create a live agent file + `~/.claude/agents/` symlink and edit a
+> sibling agent's description, because the case asked it to "deploy" something and
+> nothing stopped it. Two rules follow: **(1)** never remove `--tools ""`;
+> **(2)** phrase every case input as *produce the output*, never *perform the
+> action* — every case now carries "no file tools are available in this
+> environment". A whitelist is used rather than `--disallowedTools` so a newly
+> added mutating tool cannot silently slip through.
+
 > ⚠️ **Validity caveat — implementer-class agents are under-measured here.**
-> This harness runs agents via plain `claude -p` with **no tools and no real
-> repo**. That fits agents whose output IS text (Code Reviewer), but
+> This harness runs agents via `claude -p` with **no tools and no real
+> repo** (enforced, see above). That fits agents whose output IS text (Code Reviewer), but
 > an agent whose real job is editing files (Senior Developer) tends to *describe a
 > plan* instead of emitting code unless the case input explicitly says "no file
 > tools available — output the code inline" (see the two `sd-` implementation
@@ -88,9 +130,15 @@ the agent. **Exit code 0 = all pass, 1 = at least one FAIL** — so it can gate 
 ## Cost warning
 
 Each case = **2 `claude` calls** (agent + judge), both on Opus. Full run is
-2 agents × 4 cases × 2 = **~16 calls**, a few minutes and real token spend. For
-iterating on one agent use `--agent`; for a sanity check use `--case`. Don't run
-the full suite casually.
+22 cases × 2 = **~44 calls** — that is roughly 10+ minutes wall clock and real
+token spend. For iterating on one agent use `--agent` (8 calls); for a sanity
+check use `--case` (2 calls). **Don't run the full suite casually** — and don't
+run it in a foreground shell with a short timeout, it will be killed mid-run and
+you'll pay for the calls already made. Background it and read the log:
+
+```bash
+bash eval/run-eval.sh > /tmp/eval.log 2>&1 &
+```
 
 ## Robustness
 
