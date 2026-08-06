@@ -13,7 +13,11 @@
 # 2026-07-08 方案 A（白名单分流 + 修 lane 分裂）:
 #   - 机密 lane 白名单 ~/.claude/backlog_confidential_lanes.txt（前缀匹配）
 #   - lane 命中机密前缀 → 改道落项目内 <repo>/.claude/BACKLOG.local.md（不 push）
-#     未命中 → 照旧落聚合仓 ~/Desktop/colar-memory/BACKLOG.md（会 push）
+#     未命中 → 落聚合仓 ~/Desktop/colar-memory/BACKLOG.md
+#     ⚠️ 2026-08-05 订正：该文件已 gitignore，**不再 push、不跨机同步**（原注释写"会 push"是错的）。
+#     Why：本 hook 每 session 改写它却从不 commit → 树永远脏 → SessionStart 的 auto-pull
+#     （守卫条件 dirty==0 && ahead==0）永远跳过，双机同步曾因此静默断裂 27 天。
+#     BACKLOG 是 live tracker 不是 memory，本机自持即可；缺失时本 hook 会自动重建。
 #   - lane 分裂修复：非 git 的 misc lane 也做前缀归并（git repo 早由 rev-parse 收敛到 root）
 #
 # 2026-07-10 衰减与去重升级（修 backlog 无限膨胀污染开场 context）:
