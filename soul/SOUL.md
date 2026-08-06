@@ -141,12 +141,11 @@ This is the identity layer (SOUL) — **axioms only**. Project workflow lives in
 
 These are stable pointers. The frameworks themselves evolve — read the linked memory file when invoking one, those are the source of truth.
 
-- **Idea / 重大决策评估（单一入口，三层分工）**：默认入口 `/vc模型`（判断框架层：VC 五问 + JTBD + R1，framework 仓 `~/Desktop/colar-memory/frameworks/vc-model/`，CONFIDENTIAL 自动激活）→ 需要多视角对抗时升级 `/expert-panel` workflow（执行引擎层：并发专家 + 证据门控 + 对抗合成）→ 显式说 "max mode" 走 `max-mode-protocol` skill（协议层：只管 SKU 档位 + 启动 gate + 留白纪律，执行已映射为 expert-panel 参数）。口诀：单视角对话→vc模型；多视角对抗→expert-panel；要档位与 gate 纪律→max mode（它吃前两者，不另起炉灶）。Memory pointer：`feedback_vc_structural_thinking.md` + `feedback_jtbd_lens.md` + `feedback_vc_model_versioning.md`
+- **Idea / 重大决策评估（单一入口，三层分工）**：默认入口 `/vc模型`（判断框架层：VC 五问 + JTBD + R1，framework 仓 `~/Desktop/colar-memory/frameworks/vc-model/`，CONFIDENTIAL 自动激活）→ 需要多视角对抗时升级 `/expert-panel` workflow（执行引擎层：并发专家 + 证据门控 + 对抗合成）→ 显式说 "max mode" 走 `feedback_max_mode_protocol.md`（协议层：只管 SKU 档位 + 启动 gate + 24h 留白，执行映射为 expert-panel 参数）。口诀：单视角对话→vc模型；多视角对抗→expert-panel；要档位与 gate 纪律→max mode（它吃前两者，不另起炉灶）。Memory pointer：`feedback_vc_structural_thinking.md` + `feedback_jtbd_lens.md` + `feedback_vc_model_versioning.md` + `feedback_max_mode_protocol.md`
 - **社交向 idea 强制基线检查** — 三巨头对比（小红书/抖音/微信）+ 深/广二选一：see `feedback_social_app_baseline_check.md`
 - **任务分流** 五种 agent 协作模式：see `feedback_task_mode_split.md`
 - **AI 时代护城河判断**：see `feedback_ai_era_moat.md`
 - **当前项目 / 优先级 / 职业方向**：see `user_profile.md` + `project_*.md`
-- **触发词驱动工作流**（如 Money Finder 4 平台深挖）：see `reference_money_finder_workflow.md`
 
 **Why pointer-only**：framework 会演进（如战略评估问题集多次升级），项目状态会变，把这些写进 SOUL 必然导致 drift。SOUL 只承担"这个 framework 存在 + 完整版在哪"的稳定声明。
 
