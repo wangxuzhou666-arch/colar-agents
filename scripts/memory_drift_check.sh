@@ -129,6 +129,42 @@ def main():
                 + "  注: 候选重复。SOUL 已 cover 该 axiom,memory 可能多余。\n"
                 + "  → 决策: 删 memory(SOUL 已写) / 升级 SOUL(memory 更细致) / 保留(细化案例,加 pointer)")
 
+        # 3b(2026-08-05): SOUL 全文副本住在 commands/ 与 skills/ 的盲区。
+        #   2026-08-05 审计发现 4-class Impact Analysis 表同时存在于 SOUL、commands/save-memory.md
+        #   与 colar-agents/CLAUDE.md,三方各自声称权威(save-memory 甚至写明"别处出现全文副本即
+        #   drift,删副本")——上面的 3 只扫 memory frontmatter,对命令/skill 目录结构性失明,
+        #   所以这个活性冲突(照字面执行会去删 SOUL)长期没人发现。
+        #   判据: 单文件命中 >=3 个 SOUL bold 短语 = 疑似搬运了整段,不是偶然用词重合。
+        COPY_HITS_MIN = 3
+        copy_scan = sorted(glob.glob(os.path.expanduser("~/Desktop/colar-agents/commands/*.md"))) \
+                  + sorted(glob.glob(os.path.expanduser("~/.claude/skills/*/SKILL.md"))) \
+                  + sorted(glob.glob(os.path.expanduser("~/Desktop/colar-agents/CLAUDE.md")))
+        copies = []
+        for f in copy_scan:
+            body = read_text(f)
+            if not body:
+                continue
+            # 只算"非引用式"命中：短语所在行若点名了 SOUL,那是 pointer 不是副本。
+            # (2026-08-05 首跑即验: compile-doc.md 三处命中全带 "SOUL 铁律/SOUL 规则" 字样,
+            #  属正确引用。不加这层过滤,检查一上线就是噪音,会被当红点通胀无视。)
+            hit = []
+            for p in phrases:
+                for ln in body.splitlines():
+                    if p.lower() in ln.lower() and "soul" not in ln.lower():
+                        hit.append(p)
+                        break
+            if len(hit) >= COPY_HITS_MIN:
+                shown = ", ".join("'%s'" % p for p in hit[:3])
+                more = ("  等 %d 个" % len(hit)) if len(hit) > 3 else ""
+                copies.append("  %s  命中 %d 个 SOUL 短语: %s%s"
+                              % (f.replace(os.path.expanduser("~"), "~"), len(hit), shown, more))
+        if copies:
+            sections.append(
+                "=== SOUL FULL-TEXT COPY (commands/ 或 skills/ 里疑似 SOUL 整段副本) ===\n"
+                + "\n".join(copies) + "\n"
+                + "  注: 多处持同一段全文 = 三方各自声称权威的温床,照字面执行会互删。\n"
+                + "  → 决策: 选一处当权威留全文,其余改 pointer(SOUL 的定位是 axioms-only,通常权威不该在 SOUL)")
+
     # --- 4. Stale candidates (短 + 60d+ + 无视觉锚) ---
     ANCHORS = ("🔴", "⚠️", "🆕", "🚨", "🔄")
     stale = []
@@ -222,11 +258,20 @@ def main():
         if next_pat.search(read_text(f)):
             mtime = time.strftime("%Y-%m-%d", time.localtime(st.st_mtime))
             expired.append("  %s  (mtime %s)  %s" % ("30d+", mtime, f))
+    # 8b(2026-08-05): 索引文件自身也会挂 next-action,且比正文腐烂得更久——
+    #   MEMORY.md:137 那条 workplay next-action 被正文作废后仍在索引里挂了 30 天,
+    #   全靠人工发现。索引行不看 mtime(索引天天被改,mtime 永远新鲜),改为:
+    #   索引里出现 next-action 字样即报,因为动态 next-action 本就该进 BACKLOG 不进索引。
+    for idx in index_files:
+        for i, ln in enumerate(read_text(idx).splitlines(), 1):
+            if next_pat.search(ln):
+                expired.append("  索引行    %s:%d  %s" % (idx, i, ln.strip()[:80]))
     if expired:
         sections.append(
-            "=== EXPIRED NEXT-ACTIONS (project_*.md 含 '下次 session' 且 30d+ 未改) ===\n"
+            "=== EXPIRED NEXT-ACTIONS (project_*.md 含 '下次 session' 且 30d+ 未改 / 索引挂 next-action) ===\n"
             + "\n".join(sorted(expired)) + "\n"
-            + "  注: next-action 已过保鲜期 — 要么已做完(清掉该行),要么项目停滞(归档)。")
+            + "  注: next-action 已过保鲜期 — 要么已做完(清掉该行),要么项目停滞(归档)。\n"
+            + "      索引层的 next-action 一律该清: 动态任务进 BACKLOG.md,索引只描述文件是什么。")
 
     # --- 9. Hook mechanism claims vs settings.json 实态 ---
     # Why: 2026-08-05 审计发现 3 条腐烂全属此类且全部逃过既有 8 项检查——memory/SOUL 里
