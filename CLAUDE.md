@@ -30,7 +30,7 @@ act → /diff → commit
 ⑧ save memory（非显而易见的决策） + SOUL drift check
    ↳ 若本 session 产出可复用 procedure（稳定触发 + 可固化步骤）→ 跑 /capture-skill（层 3，带写时查重，见下方「收尾节点」）
    ↳ 若新 memory 否定/升级了 SOUL.md 某条声明 → **升级类必须先提议 SOUL diff（旧 = … / 新 = …）等 Colar 拍板 (y/n)，不得自行改 SOUL**（权威版本：SOUL §「SOUL ↔ Memory Sync Discipline」#1）
-   ↳ drift 扫描：`memory_drift_check.sh` 已接 Stop hook 自动跑（advisory，clean 时静默）；SOUL 措辞黑名单扫描仍手动 `bash ~/Desktop/agency-agents/scripts/drift-check.sh`
+   ↳ drift 扫描：`memory_drift_check.sh` 已接 Stop hook 自动跑（advisory，clean 时静默）；SOUL 措辞黑名单扫描仍手动 `bash ~/Desktop/colar-agents/scripts/drift-check.sh`
 ⑨ commit
 ```
 
@@ -50,7 +50,7 @@ act → /diff → commit
 ⑧ save memory（关键架构决策的 trade-off + 被排除方案的原因） + SOUL drift check
    ↳ 若本 session 产出可复用 procedure → 跑 /capture-skill（层 3 procedural capture，带写时查重，见下方「收尾节点」）
    ↳ 架构性变更尤其容易让 SOUL 过期 — 发现受影响段落时**提议 SOUL diff 等 Colar 拍板 (y/n)，不得自行改**（权威版本：SOUL §「SOUL ↔ Memory Sync Discipline」#1）
-   ↳ `memory_drift_check.sh` 已接 Stop hook 自动跑；SOUL 黑名单扫描手动 `bash ~/Desktop/agency-agents/scripts/drift-check.sh`；改 SOUL 后反向 grep memory 列 deprecate 候选
+   ↳ `memory_drift_check.sh` 已接 Stop hook 自动跑；SOUL 黑名单扫描手动 `bash ~/Desktop/colar-agents/scripts/drift-check.sh`；改 SOUL 后反向 grep memory 列 deprecate 候选
 ⑨ PR
 ```
 
@@ -60,7 +60,9 @@ act → /diff → commit
 
 **凡改动 agent prompt body（master `.md` frontmatter 之后正文），强制 before/after 跑 eval 对比 pass rate——别盲改。** 改 frontmatter（routing metadata）不触发。
 
-完整流程（触发表 / `run-eval.sh --agent` 命令 / 四条铁律 / 变异来源辨析）见 skill `integrations/hermes/skills/agent-prompt-edit-gate/SKILL.md`（attach-on-demand，此处不复述全文）。
+完整流程（触发表 / `run-eval.sh --agent` 命令 / 四条铁律 / 变异来源辨析）见 skill **`agent-prompt-edit-gate`**（attach-on-demand，此处不复述全文）。
+
+> 2026-08-05：该 skill 此前只以 `integrations/hermes/` build 产物形式存在，从不在可调用列表里、加载失败还不报错（静默降级）。现已 symlink 进 `~/.claude/skills/`，按名字即可调起。
 
 ---
 
@@ -71,14 +73,14 @@ Agents 已按项目分层部署，Claude Code 自动发现，不需要手动指�
 ```
 Tier 1: ~/.claude/agents/         ← 全局 agent，所有项目可用（symlink → master，手动 ln -s 管理）
 Tier 2: <project>/.claude/agents/ ← 按项目精选的专项 agent（sync 脚本从 master 复制）
-Master: ~/Desktop/agency-agents/  ← 单一真相源（全局走 symlink、项目走 sync 复制）
+Master: ~/Desktop/colar-agents/  ← 单一真相源（全局走 symlink、项目走 sync 复制）
 ```
 
 > 数量随项目演化变化，不在此处固定声明。当前快照：`ls ~/.claude/agents/ | wc -l`。
 
-**全局 agent（Tier 1）机制**：`~/.claude/agents/*.md` 是指向 master 的 **symlink**，手动创建：`ln -s ~/Desktop/agency-agents/<domain>/<file>.md ~/.claude/agents/<file>.md`。**只编辑 master 文件**——symlink 让改动即时对 Claude Code 生效；绝不在 `~/.claude/agents/` 放非 symlink 文件（破坏单一真相源）。
+**全局 agent（Tier 1）机制**：`~/.claude/agents/*.md` 是指向 master 的 **symlink**，手动创建：`ln -s ~/Desktop/colar-agents/<domain>/<file>.md ~/.claude/agents/<file>.md`。**只编辑 master 文件**——symlink 让改动即时对 Claude Code 生效；绝不在 `~/.claude/agents/` 放非 symlink 文件（破坏单一真相源）。
 
-**项目 agent（Tier 2）机制**：项目的 `.claude/agent-config.yaml` 声明需要哪些 agent，运行 `bash scripts/sync-all.sh` 从 master library 复制到项目的 `.claude/agents/`；新增单项目：编辑该项目 `agent-config.yaml` 后跑 `bash ~/Desktop/agency-agents/scripts/sync-agents.sh <project-path>`。**不要手动往项目 `.claude/agents/` 放文件**——项目层用 sync 脚本管理。
+**项目 agent（Tier 2）机制**：项目的 `.claude/agent-config.yaml` 声明需要哪些 agent，运行 `bash scripts/sync-all.sh` 从 master library 复制到项目的 `.claude/agents/`；新增单项目：编辑该项目 `agent-config.yaml` 后跑 `bash ~/Desktop/colar-agents/scripts/sync-agents.sh <project-path>`。**不要手动往项目 `.claude/agents/` 放文件**——项目层用 sync 脚本管理。
 
 ---
 
@@ -178,7 +180,7 @@ Master: ~/Desktop/agency-agents/  ← 单一真相源（全局走 symlink、项�
 
 **四段**：Design Bridge（门卫，必经，Replication 复刻 / Genesis 创世 二选一）→ frontend-design plugin 执行 → Frontend Developer 落地 → `/diff` → build → `/review`。
 
-完整流程（两种模式判据 / 66 品牌 / Genesis 产出格式 / 「没指定品牌时给三条路，别把原创产品硬塞现成品牌」）见 skill `integrations/hermes/skills/ui-design-pipeline/SKILL.md`（attach-on-demand，此处不复述全文）。
+完整流程（两种模式判据 / 66 品牌 / Genesis 产出格式 / 「没指定品牌时给三条路，别把原创产品硬塞现成品牌」）见 skill **`ui-design-pipeline`**（attach-on-demand，此处不复述全文）。
 
 ---
 
@@ -194,7 +196,8 @@ Master: ~/Desktop/agency-agents/  ← 单一真相源（全局走 symlink、项�
 
 - **save memory**（semantic：事实 / 决策）— 只存非显而易见的：被排除的方案及原因 · 关键架构决策的 trade-off · 下次 session 需继承的上下文。**不存**代码模式 / 文件路径 / git 历史（直接读代码）。流程走 `/save-memory`。
 - **`/capture-skill`**（procedural：可复用打法）— 判据是"当 X 触发 → 照 Procedure 走"，说不出稳定触发条件的不是 skill。**主动遗忘 > 无脑累积**，宁可不 capture 也别攒垃圾。写时 4-类查重由命令自身负责。索引：`integrations/hermes/skills/SKILLS.md`（权威）。落盘后由 `/ship` 提交，命令自身不 commit。
-- **SOUL ↔ Memory Sync** — 新 memory 若否定/升级 SOUL 某段，**升级类必须先提议 SOUL diff 等 Colar 拍板 (y/n)，不得自行改 SOUL**。权威版本（4-类关系判断表）在 SOUL §「SOUL ↔ Memory Sync Discipline」，已常驻，此处不复述。drift 扫描：`memory_drift_check.sh` 已接 Stop hook 自动跑；`scripts/drift-check.sh`（SOUL 黑名单措辞 + 失效路径）仍手动。改 SOUL 后反向 `grep -l <旧措辞>` memory 列 deprecate 候选。
+  > ⚠️ **新 skill 必须接线才可调用**：写进 `integrations/hermes/skills/<name>/` 只是落盘，Claude Code **不从那里发现 skill**（Hermes runtime 已放弃，`~/.hermes` 从未生成）。必须 `ln -s ~/Desktop/colar-agents/integrations/hermes/skills/<name> ~/.claude/skills/<name>` 才会出现在可调用列表。2026-08-05 前有 6 个 skill 因缺这一步长期不可调用且**加载失败不报错**（静默降级），已全部补接。
+- **SOUL ↔ Memory Sync** — 新 memory 若否定/升级 SOUL 某段，**升级类必须先提议 SOUL diff 等 Colar 拍板 (y/n)，不得自行改 SOUL**。4-类关系判断表的**权威全文在 `/save-memory`**（`commands/save-memory.md` § Step 1）——2026-08-05 拍板：此前 SOUL / save-memory / 本文件三方互相声称权威，现统一归 save-memory，SOUL 与此处只持 pointer。drift 扫描：`memory_drift_check.sh` 已接 Stop hook 自动跑；`scripts/drift-check.sh`（SOUL 黑名单措辞 + 失效路径）仍手动。改 SOUL 后反向 `grep -l <旧措辞>` memory 列 deprecate 候选。
 - 延伸：memory `feedback_soul_drift_session_close.md` · `soul/SOUL.md` · `soul/drift-blacklist.txt` · `soul/drift-whitelist.txt`
 
 ---
