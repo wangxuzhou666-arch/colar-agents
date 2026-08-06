@@ -53,7 +53,7 @@ MEM=$(git -C ~/Desktop/colar-memory rev-parse --show-toplevel 2>/dev/null)
 # 若 "$ROOT" == "$MEM" → SINGLE-REPO 模式：只跑一条 lane、一个 commit，不做"双 repo 分别提交"
 ```
 - `~/.claude/projects/.../memory` 是软链，**真身是 `~/Desktop/colar-memory`**
-- **SOUL.md 住在 project repo（`agency-agents/soul/`），不是 memory repo** —— SOUL 改动走 project lane 的 commit
+- **SOUL.md 住在 project repo（`colar-agents/soul/`），不是 memory repo** —— SOUL 改动走 project lane 的 commit
 - ByteDance Mac 路径不同 → memory repo 不存在则"⏭ memory lane skipped (repo 未找到)"
 
 **Lane 判定**：
@@ -71,18 +71,16 @@ MEM=$(git -C ~/Desktop/colar-memory rev-parse --show-toplevel 2>/dev/null)
 
 > .env.local 事故的教训：**零信任，不靠模型肉眼读 diff**。这是硬 gate，先于任何 commit，Tier1 也跑。
 
-扫 **staged + 未跟踪新增文件**（`git diff HEAD` 看不到 untracked，新增的 `.env.local` 会漏）：
+跑可复用 gate 脚本（规则集全在脚本里，此处不维护 prose 副本）：
 ```bash
-# 1) 高危文件名（含 untracked）
-{ git diff --cached --name-only; git ls-files --others --exclude-standard; } \
-  | grep -iE '\.env|\.pem|\.key$|\.p8$|credential|secret|id_rsa|service.*account' && HIT=1
-# 2) 高熵明文 secret（只扫 staged + untracked 内容）
-git diff --cached | grep -icE 'AIza[0-9A-Za-z_-]{35}|sk-[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{36}|-----BEGIN.*PRIVATE KEY|xox[baprs]-'
+bash ~/Desktop/colar-agents/scripts/secret-gate.sh "$ROOT"
 ```
+脚本扫 **staged 内容 + untracked 新文件 + 高危文件名**（`git diff HEAD` 看不到 untracked，新增的 `.env.local` 会漏——脚本已覆盖）。**exit 1 = 命中 → 立即中止 ship，不 commit**，把脚本输出的命中清单（文件:行 + 规则名 + 前4字符打码）列给 Colar。
+
 **命中处理**：
-- **立即停，不 commit**。报告**只给 文件名 + 行号 + 命中规则名**，**绝不把匹配内容贴进 chat**（守 SOUL 凭证铁律，避免二次泄漏）。用 `grep -l`（只出文件名）/ `-c`（只出计数）。
+- **立即停，不 commit**。转述只引用脚本的打码输出，**绝不自己再去 grep/read 原文件把匹配内容贴进 chat**（守 SOUL 凭证铁律，避免二次泄漏）。
 - target=PUBLIC 时这是**阻断级**——推进公开仓库历史不可逆，必须人工处理。
-- ⚠️ 诚实标注：PUBLIC repo `agency-agents` 无 CI gitleaks（`.gitleaks.toml` 是死配置），**本地这道 gate 是唯一防线**，别假装有 CI 兜底。
+- ⚠️ 诚实标注：PUBLIC repo `colar-agents` 无 CI gitleaks（`.gitleaks.toml` 是死配置），**本地这道 gate 是唯一防线**，别假装有 CI 兜底。
 
 `--dry` 在此 gate 之后停。
 
@@ -97,7 +95,7 @@ git diff --cached | grep -icE 'AIza[0-9A-Za-z_-]{35}|sk-[A-Za-z0-9]{20,}|ghp_[A-
 | `package.json` 有 `build` script | `[ -f tsconfig.json ] && npx tsc --noEmit;` + `npm run build` + test（Next/Vite/plain 通用，tsc 仅在有 tsconfig 时跑） |
 | `*.xcodeproj` / Swift | `xcodebuild`（项目既定 scheme） |
 | `pyproject.toml` 或 `requirements.txt` | `pytest` / `ruff check`（按项目既定） |
-| repo == agency-agents | `bash ~/Desktop/agency-agents/scripts/lint-agents.sh`（绝对路径） |
+| repo == colar-agents | `bash ~/Desktop/colar-agents/scripts/lint-agents.sh`（绝对路径） |
 | 无 build 系统（纯 md/脚本） | ⏭ "无 build step，跳过" |
 
 **失败 → 停，贴真实报错，不 commit、不粉饰。** 修完后重敲 `/ship` 即可（Step 0-3 幂等可安全重跑，commit 之前无 git 副作用）。
@@ -109,10 +107,9 @@ git diff --cached | grep -icE 'AIza[0-9A-Za-z_-]{35}|sk-[A-Za-z0-9]{20,}|ghp_[A-
 ## Step 5 — Project commit + push
 
 ```bash
-git push origin "$BRANCH"   # 显式 origin+branch；agency-agents 有 upstream remote，禁裸 push
+git push origin "$BRANCH"   # 显式 origin+branch；colar-agents 有 upstream remote，禁裸 push
 ```
-- commit：conventional `feat(scope):…`/`fix(scope):…`（英文）+ 结尾空行后加
-  `Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>`
+- commit：conventional `feat(scope):…`/`fix(scope):…`（英文）；Co-Authored-By 行由 harness 按当前模型自动注入，**不在此写死模型名**（硬编码必 drift）
 - push 前 `git status` 须 clean；无 upstream → `git push -u origin "$BRANCH"`
 - `git pull --rebase origin "$BRANCH" && git push origin "$BRANCH"`；**rebase 冲突 → `git rebase --abort` 回干净点 + 停下告知**（绝不 force push）
 - `--no-push` → 只 commit
@@ -130,24 +127,14 @@ git push origin "$BRANCH"   # 显式 origin+branch；agency-agents 有 upstream 
 
 **幂等保护**：先 `git -C ~/Desktop/colar-memory status --short`，若本次 memory 已 dirty/已写 → 不重复写、不重复加 pointer。
 
-**有可存内容 → 强制跑 SOUL 4-class Impact Analysis**：
-
-| 关系 | 判断 | 处理 | 话术 |
-|---|---|---|---|
-| **重复** | SOUL 已有同 axiom | 不写 | "SOUL § X 已 cover，跳过" |
-| **升级** | 否定/替代 SOUL | 写 + 提议 SOUL diff | "升级 § X：旧=… 新=… 同步吗?(y/n)" → ⛔ **停等拍板（只阻塞本 lane，project 已 ship）** |
-| **细化** | SOUL axiom 的实现细节 | 写 + 加 'See SOUL § X' 反向 link | "细化 § X，已加 link" |
-| **正交** | 与 SOUL 无交集 | 正常写 | "SOUL impact: 无 · 写入" |
-
-写文件：frontmatter（name/description/type）+ feedback/project 补 `**Why:**`/`**How to apply:**`；`MEMORY.md` 加/更新一行 pointer 归到对应 section。
-**时间锚点**：日期取自 `[time-context::hook-only]` 注入行，time-bound 事实戳绝对 `YYYY-MM-DD`，timeless axiom 不戳；hook UNAVAILABLE 则拒绝戳日期。
+**有可存内容 → 跑 `/save-memory`**（SOUL 4-class Impact Analysis + 写文件规范 + 时间锚点纪律全在该命令，此处不重复维护）。命中「升级」类 ⛔ 停等拍板 —— **只阻塞本 lane，project 已 ship**。
 过程文件**只列路径 + 一句话**，不 open、不粘原文。
 
 ### Step 7 — Memory drift + commit + push
 
 ```bash
-bash ~/Desktop/agency-agents/scripts/drift-check.sh          # SOUL 黑名单措辞 + 失效路径
-bash ~/Desktop/agency-agents/scripts/memory_drift_check.sh   # unindexed / dead link / stale
+bash ~/Desktop/colar-agents/scripts/drift-check.sh          # SOUL 黑名单措辞 + 失效路径
+bash ~/Desktop/colar-agents/scripts/memory_drift_check.sh   # unindexed / dead link / stale
 ```
 命中只报 **文件名 + 问题类型**，不贴文件内容（drift 可能扫到含凭证的 `reference_*.md`）。clean 时静默。
 
@@ -176,7 +163,7 @@ git -C ~/Desktop/colar-memory pull --rebase origin main && git -C ~/Desktop/cola
 - ❌ build/test 失败 → 停，贴真实报错，不假装通过
 - ❌ SOUL「升级」类 → 停等确认（只阻塞 memory lane，不连坐 project）
 - ❌ git 冲突 → `rebase --abort` + 停，绝不 `push --force`
-- ❌ 禁裸 `git push` / `git add -A`（agency-agents 有 upstream remote；over-stage 会带出凭证草稿）
+- ❌ 禁裸 `git push` / `git add -A`（colar-agents 有 upstream remote；over-stage 会带出凭证草稿）
 - ✅ secret gate / build 是 Tier 无关的；review 才按 Tier 缩放
 - ✅ 过程产物只列路径不 open、不粘原文；报告如实标跳过+原因
 - ✅ recall 索引交给 Stop hook，本命令不重复跑

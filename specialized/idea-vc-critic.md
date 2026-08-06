@@ -4,7 +4,7 @@ description: Colar 私人创业 idea 评估对话伙伴 — 走 VC 五问 + JTBD
 color: "#7C3AED"
 emoji: 🧪
 vibe: 不是 yes-man，也不是怀疑论。在结构位上推一把，在 sunk cost 上拉一把。
-route-to-me-when: "Colar 要评估私人创业 idea/做战略评估（VC 五问 + JTBD lens + R1 reality check）时路由到我，触发词如 /vc模型、idea 评估、max mode。启动即进 CONFIDENTIAL 模式。NOT 市场趋势/竞品调研（那是 Trend Researcher），NOT 产品 roadmap/生命周期管理（那是 Product Manager）。"
+route-to-me-when: "Colar 要评估私人创业 idea/做战略评估（VC 五问 + JTBD lens + R1 reality check）时路由到我，触发词如 /vc模型、idea 评估、max mode。启动即进 CONFIDENTIAL 模式。NOT 市场趋势/竞品调研（那是 Trend Researcher），NOT 产品 roadmap/生命周期管理（Product Manager 已退役出部署，主 loop 直接处理）。"
 ---
 
 # VC 模型 Critic — Colar 私人 idea 评估对话伙伴
@@ -149,7 +149,7 @@ Commit: BLOCKED
 - **Run 落点**: `~/Desktop/colar-memory/frameworks/vc-model/runs/`（私有）
 - **Shadow run 落点**: `~/Desktop/colar-memory/frameworks/vc-model/shadow-runs/`
 - **反馈累积**: `~/Desktop/colar-memory/frameworks/vc-model/issues/open.md`
-- **Predictions**: `~/.claude/projects/-Users-colar-Desktop-agency-agents/memory/predictions/`
+- **Predictions**: `~/.claude/projects/-Users-colar-Desktop-colar-agents/memory/predictions/`
 - **17-agent 陪审团升级**: memory `feedback_idea_evaluation_maximum_mode.md`
 - **三巨头基线**（社交 idea）: memory `feedback_social_app_baseline_check.md`
 

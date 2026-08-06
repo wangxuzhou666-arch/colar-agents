@@ -7,18 +7,18 @@
 ## 已 ship (本 session 2026-05-24)
 
 ### 1. Hermes 自我迭代 infra 第一层 (SQLite + FTS5 cross-session recall)
-- `~/Desktop/agency-agents/scripts/recall/schema.sql` — DB schema (FTS5 external content + trigger)
-- `~/Desktop/agency-agents/scripts/recall/index.py` — jsonl → SQLite indexer (含 secret redaction + race fix)
-- `~/Desktop/agency-agents/scripts/recall/recall.py` — CLI (含 `--unsafe` flag, default redact PII)
-- `~/Desktop/agency-agents/scripts/recall/redact.py` — 11 类 secret pattern + 3 类 PII
-- `~/Desktop/agency-agents/scripts/recall/pilot_audit.py` — pilot 周期审计
-- `~/Desktop/agency-agents/scripts/hooks/recall_index.sh` — Stop hook (已接 `~/.claude/settings.json`)
+- `~/Desktop/colar-agents/scripts/recall/schema.sql` — DB schema (FTS5 external content + trigger)
+- `~/Desktop/colar-agents/scripts/recall/index.py` — jsonl → SQLite indexer (含 secret redaction + race fix)
+- `~/Desktop/colar-agents/scripts/recall/recall.py` — CLI (含 `--unsafe` flag, default redact PII)
+- `~/Desktop/colar-agents/scripts/recall/redact.py` — 11 类 secret pattern + 3 类 PII
+- `~/Desktop/colar-agents/scripts/recall/pilot_audit.py` — pilot 周期审计
+- `~/Desktop/colar-agents/scripts/hooks/recall_index.sh` — Stop hook (已接 `~/.claude/settings.json`)
 - `~/.claude/recall.db` — 405 session / 21490 message / 26.8MB / chmod 600
 
 ### 2. Hermes pilot 3 个 skill (从 5 个 feedback 迁出)
-- `~/Desktop/agency-agents/integrations/hermes/skills/nextjs-hmr-proactive-restart/SKILL.md`
-- `~/Desktop/agency-agents/integrations/hermes/skills/ui-design-emoji-discipline/SKILL.md`
-- `~/Desktop/agency-agents/integrations/hermes/skills/max-mode-protocol/SKILL.md` (合并 3 feedback: idea_eval_max_mode + explicit_trigger + self_ritualization)
+- `~/Desktop/colar-agents/integrations/hermes/skills/nextjs-hmr-proactive-restart/SKILL.md`
+- `~/Desktop/colar-agents/integrations/hermes/skills/ui-design-emoji-discipline/SKILL.md`
+- `~/Desktop/colar-agents/integrations/hermes/skills/max-mode-protocol/SKILL.md` (合并 3 feedback: idea_eval_max_mode + explicit_trigger + self_ritualization)
 
 ### 3. Memory 重组
 - 5 个 feedback 删除 (已迁 skill)
@@ -29,7 +29,7 @@
 - shell injection / uuid 重复 / FTS5 rebuild / race / chmod 600 / secret redact / FTS5 query escape
 
 ### 5. 决策档案
-- Triage plan 归档到 `~/.claude/projects/-Users-colar-Desktop-agency-agents/memory/transcripts/2026-05-24_hermes_pilot_triage_plan.md`
+- Triage plan 归档到 `~/.claude/projects/-Users-colar-Desktop-colar-agents/memory/transcripts/2026-05-24_hermes_pilot_triage_plan.md`
 - 本文件 = session handoff
 
 ---
@@ -39,7 +39,7 @@
 ### P0 — 2026-06-07 必做: Pilot KPI Gate
 
 ```bash
-python3 ~/Desktop/agency-agents/scripts/recall/pilot_audit.py --window 14d
+python3 ~/Desktop/colar-agents/scripts/recall/pilot_audit.py --window 14d
 ```
 
 KPI gate (见 `PILOT_BASELINE.md`):
@@ -84,10 +84,10 @@ Skill 自动 emit 机制（session 结束 LLM 判定是否生成 SKILL.md 草稿
 ## 启动新 session 时读的文件 (顺序)
 
 1. `~/.claude/CLAUDE.md` (SOUL, 自动)
-2. `~/Desktop/agency-agents/CLAUDE.md` (项目 workflow, 自动)
-3. `~/.claude/projects/-Users-colar-Desktop-agency-agents/memory/MEMORY.md` (自动)
-4. `~/Desktop/agency-agents/scripts/recall/SESSION_HANDOFF_2026-05-24.md` (本文件)
-5. `~/Desktop/agency-agents/scripts/recall/PILOT_BASELINE.md` (KPI gate)
+2. `~/Desktop/colar-agents/CLAUDE.md` (项目 workflow, 自动)
+3. `~/.claude/projects/-Users-colar-Desktop-colar-agents/memory/MEMORY.md` (自动)
+4. `~/Desktop/colar-agents/scripts/recall/SESSION_HANDOFF_2026-05-24.md` (本文件)
+5. `~/Desktop/colar-agents/scripts/recall/PILOT_BASELINE.md` (KPI gate)
 6. (按需) `~/.claude/projects/.../memory/transcripts/2026-05-24_hermes_pilot_triage_plan.md` (历史决策)
 
 ---
@@ -106,17 +106,17 @@ Skill 自动 emit 机制（session 结束 LLM 判定是否生成 SKILL.md 草稿
 
 ```bash
 # 1. DB 健康
-python3 ~/Desktop/agency-agents/scripts/recall/index.py --stats
+python3 ~/Desktop/colar-agents/scripts/recall/index.py --stats
 # 期望: Sessions 400+ / Messages 20000+ / DB ~25-30MB
 
 # 2. recall 工作
-python3 ~/Desktop/agency-agents/scripts/recall/recall.py "Hermes pilot" --limit 3
+python3 ~/Desktop/colar-agents/scripts/recall/recall.py "Hermes pilot" --limit 3
 
 # 3. Stop hook 在
 python3 -c "import json; d=json.load(open('/Users/colar/.claude/settings.json')); print(len(d['hooks']['Stop'][0]['hooks']), 'Stop hooks')"
 # 期望: 3 Stop hooks
 
 # 4. 3 pilot skill 在位
-ls ~/Desktop/agency-agents/integrations/hermes/skills/ | grep -E '(nextjs-hmr|ui-design-emoji|max-mode-protocol)'
+ls ~/Desktop/colar-agents/integrations/hermes/skills/ | grep -E '(nextjs-hmr|ui-design-emoji|max-mode-protocol)'
 # 期望: 3 行
 ```

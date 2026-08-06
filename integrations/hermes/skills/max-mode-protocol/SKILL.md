@@ -60,29 +60,32 @@ source: merged from feedback_idea_evaluation_maximum_mode + feedback_max_mode_ex
 3. **同 pattern 第 3 次**: 同类项目第 3 次启 max mode → 不跑流程,套已有 SOP(`feedback_p3_tool_one_battle_sop`),问"为什么又来到这里"
 4. **P0 红灯**: Colar 主线 P0(毕业 / 实习 onboarding)当周 → 降级 mini-quick mode
 
-### Step 4: 17-agent Full Max Mode 工作流
+### Step 4: 执行层 — SKU 映射到 /expert-panel(不再照名单手动 spawn)
 
-**Phase 0 — 8 agent 并行信息收集**:
-- marketing-zhihu-strategist / marketing-douyin-strategist / marketing-bilibili-content-strategist
-- marketing-twitter-engager / marketing-reddit-community-builder / marketing-cross-border-ecommerce
-- general-purpose × 2(竞品调研 + 趋势纵深)
+> ⚠️ **下方视角配方是 master library 库存名单,不是可 spawn 菜单。** 当前部署仅 ~16 个 agent(以 `ls ~/.claude/agents/` 和系统注入的 available agent types 为准),配方中大多数 agent 未部署——未部署的直接 spawn 必然 Agent tool 连环失败。编排一律走 `/expert-panel` workflow(已封装并发 fan-out + 证据门控 + 对抗验证 + 保留异见合成);未部署的视角用 `general-purpose` + lens 扮演,或先 `ln -s` 部署再 spawn。
 
-**Phase 1 — 6 agent 并行多视角讨论**(每 agent 必须引用 ≥2 份 Phase 0 证据):
-- product-trend-researcher(信号 vs 噪音)
-- product-feedback-synthesizer(JTBD 合成)
-- specialized-behavioral-decision-scientist(决策瓶颈)
-- sales-discovery-coach(付费意愿)
-- specialized-cultural-intelligence-strategist(跨文化盲点)
-- product-manager(problem → MVP)
+**SKU → expert-panel 参数映射**(SKU 选择纪律与 gate 决策不变,只换执行层):
 
-**Phase 2 — 3 agent 串行对抗筛选**:
-- testing-agent-red-team-specialist(红队全力杀 idea)
-- testing-reality-checker(默认 NEEDS WORK,VC 五问硬门控)
-- general-purpose 扮演 NEXUS(最终战略仲裁)
+| SKU | experts(显式 cast,agentType 必须已部署) | maxRounds | verifyVotes | budget |
+|---|---|---|---|---|
+| 17-agent Full Max | 5-6 个 lens(按下方视角配方裁剪,缺位视角用 general-purpose + lens 顶) | 不传(给 budget 跑到耗尽) | 2-3 | "+500k" 级 |
+| 7-agent MVMM | 4 | 2 | 2 | "+200k" 级 |
+| 4-agent P3 工具评估 | 3(R7/D1/D3/A3 对应 lens 合并) | 1 | 1 | 不传 |
+| 3-agent Quick Mode | 2-3(R7/D1/D3 lens) | 1 | 1 | 不传 |
+| 2-agent mini-quick | 不走 panel——直接 2 个 Agent 调用(D3+R7 lens),panel 开销不值 | — | — | — |
 
-**Phase 3 — 可选 4 agent 验证资产生成**:
-- marketing-xiaohongshu-specialist / marketing-content-creator
-- sales-discovery-coach(访谈脚本)/ engineering-rapid-prototyper(MVP 骨架)
+args 完整契约见 `workflows/expert-panel.js` 头注释:`question` 必传;`experts: [{agentType, lens}]` / `agentRoster`(传运行时可调用集,让 selector cast)/ `verifyVotes` / `maxRounds` / `budgetFloor`。
+
+**原三 phase 结构 → panel 机制对应**(纪律保留,机制换壳):
+- Phase 0 证据收集 + "每 agent 必须引用 ≥2 份证据" → panel 内建**证据门控**(每条 claim 过 gate)
+- Phase 1 多视角并行讨论 → panel 并发 fan-out(experts × lens)
+- Phase 2 红队/reality-check 串行对抗 + NEXUS 仲裁 → panel **对抗验证**(verifyVotes 个 skeptic)+ **保留异见合成**(verify 先于 synthesize,顺序内建)
+- Phase 3 验证资产生成(可选) → panel 结束后按需单独 spawn **已部署** agent(如 marketing-xiaohongshu-specialist)
+
+**Full Max 视角配方**(lens 素材库,供撰写 experts 的 lens 字段用;⚠️ 非 spawn 名单,见上方警告):
+- 信息收集 lens:知乎/抖音/B站/Twitter/Reddit/跨境电商平台信号 + 竞品调研 + 趋势纵深
+- 讨论 lens:信号 vs 噪音 / JTBD 合成 / 决策瓶颈 / 付费意愿 / 跨文化盲点 / problem → MVP
+- 对抗 lens:红队全力杀 idea / VC 五问 reality check(默认 NEEDS WORK)/ NEXUS 最终战略仲裁
 
 ### Step 5: 24h 留白(反 automation bias 硬保险)
 
@@ -95,22 +98,23 @@ max mode 跑完后,**SOP / memory / 项目状态变更不立即落盘**(除非 C
 ## Verification
 
 执行后必报告:
-- 哪个 SKU 选了 + 为什么
-- Phase 1 每个 agent 引用了哪些 Phase 0 证据(防纯假设推理)
-- Phase 2 A2 (reality checker) 通过门控可能为 0 条,如实报,不为交付硬挑
+- 哪个 SKU 选了 + 为什么 + 映射成的 expert-panel 参数(experts / maxRounds / verifyVotes / budget)
+- 证据门控结果(panel 每条 claim 过 gate 情况,防纯假设推理)
+- reality-check lens 通过门控可能为 0 条,如实报,不为交付硬挑
 - 24h 留白状态: 哪些已落盘,哪些 pending
 
 ## Pitfalls
 
-- **Phase 2 A1/A2/A3 必须串行**,不要并行 — 否则 NEXUS 没看到 red team 输出
+- **spawn 前先查部署列表**: `ls ~/.claude/agents/` + 系统注入的 available agent types 才是可调用集;视角配方/库存名单里的 agentType 不在其中 = 不可 spawn,用 general-purpose + lens 顶或先 `ln -s` 部署
+- **对抗必须先于合成**: /expert-panel 已内建(verify → synthesize 顺序);若在 panel 外手动补跑红队 lens,其输出必须进合成输入,不得与合成并行 — 否则仲裁没看到 red team 输出
 - **token 不省**: max mode 核心价值是判断质量,不是省 token
-- **默认 `run_in_background=true`** 启 agent,不阻塞 Colar 对话
-- **数据不足时**: 让 max mode 自己判断该不该投入收集 vs kill,不替他延迟
-- **agent 列表非标准 idea discovery**(工具评估 / 架构决策): 适配 17 agent 列表到 brief 实际问题,但保持 总数 17 + 三 phase 结构 + 对抗 + reality check
+- **默认 `run_in_background=true`** 启 panel / agent,不阻塞 Colar 对话
+- **数据不足时**: 让 panel 自己判断该不该投入收集 vs kill,不替他延迟
+- **brief 非标准 idea discovery**(工具评估 / 架构决策): 适配 lens 配方到 brief 实际问题,保持"证据 → 多视角 → 对抗 → reality check"结构不变,不必凑 agent 总数
 
 ## Why This Skill Exists
 
-合并自 3 个互补 feedback:
+合并自 3 个互补 feedback（三者均已 migrate 进本 skill 后归档，源文件不再单独存在，下列仅记历史来源）:
 - 默认 protocol(被动识别 + 5 SKU 选择): 来自 `feedback_idea_evaluation_maximum_mode`
 - 显式触发(关键词立刻启 + 4 条硬规则): 来自 `feedback_max_mode_explicit_trigger` (2026-04-26 Colar 明确说 "我要这个 max mode 我不需要被动触发")
 - 自仪式化 gate(重复 max mode 3 问硬闸门): 来自 `feedback_max_mode_self_ritualization` (2026-04-27 trending_aggregator 第 2 次 max mode 实战印证流程仪式化是真陷阱)
@@ -120,5 +124,5 @@ max mode 跑完后,**SOP / memory / 项目状态变更不立即落盘**(除非 C
 - `feedback_sunk_cost_gate_pre_brief` — 内容投入 gate(本 skill 前置)
 - `feedback_p3_tool_one_battle_sop` — 同 pattern 第 3 次的退出 SOP
 - `feedback_vc_structural_thinking` / `frameworks/vc-model/spec/v0.6.md` — VC 五问 spec(reality-checker 用)
-- `feedback_startup_ideas_confidential` — 所有 agent prompt 顶部注入 CONFIDENTIAL 约束
+- `feedback_privacy_defaults`（原 feedback_startup_ideas_confidential，2026-07-06 三合一） — 所有 agent prompt 顶部注入 CONFIDENTIAL 约束
 - `feedback_ai_era_moat` — 原创判断层验证(Phase 0 R7 + Phase 2 A1/A2 共同执行)

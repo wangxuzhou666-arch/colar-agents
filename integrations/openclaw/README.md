@@ -2,7 +2,7 @@
 
 OpenClaw agents are installed as workspaces containing `SOUL.md`, `AGENTS.md`,
 and `IDENTITY.md` files. The installer copies each workspace into
-`~/.openclaw/agency-agents/` and registers it when the `openclaw` CLI is
+`~/.openclaw/colar-agents/` and registers it when the `openclaw` CLI is
 available.
 
 Before installing, generate the OpenClaw workspaces:

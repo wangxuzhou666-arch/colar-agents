@@ -2,7 +2,7 @@
 """
 gen-agent-index.py — Auto-generate agents/INDEX.md from filesystem truth.
 
-Scans agency-agents/*/*.md for agent files (identified by valid YAML frontmatter
+Scans colar-agents/*/*.md for agent files (identified by valid YAML frontmatter
 with `name:` field), groups by division (parent directory), and writes
 agents/INDEX.md with one table per division.
 

@@ -10,7 +10,7 @@
 
 set +e
 INPUT=$(head -c 65536)
-export SCRIPT="$HOME/Desktop/agency-agents/scripts/recall/index.py"
+export SCRIPT="$HOME/Desktop/colar-agents/scripts/recall/index.py"
 
 [ -f "$SCRIPT" ] || exit 0
 

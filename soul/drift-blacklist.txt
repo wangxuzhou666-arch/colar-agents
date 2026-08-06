@@ -7,7 +7,7 @@ quant finance background
 VC 三问
 KS > FlagBet
 KitchenSurvivor > FlagBet
-FlagBet > agency-agents
+FlagBet > colar-agents
 long-term AI startup founder
 trending_aggregator template
 trending_aggregator/discovery_prompt_template

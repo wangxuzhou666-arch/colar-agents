@@ -33,7 +33,7 @@ agent 文件按以下结构分布,Claude Code 自动发现,调用时不用手动
 ```
 ~/.claude/agents/                ← Tier 1: 全局万能 agent,所有项目可用
 <project>/.claude/agents/        ← Tier 2: 按项目精选的专项 agent
-~/Desktop/agency-agents/         ← Master library: agent 源(不直接加载)
+~/Desktop/colar-agents/         ← Master library: agent 源(不直接加载)
 ```
 
 > agent 数量随项目演化变化,不在此处声明。当前快照: `ls ~/.claude/agents/ | wc -l`。
@@ -102,16 +102,16 @@ colar-agents/
 
 ```bash
 # 1. clone master library
-git clone https://github.com/wangxuzhou666-arch/colar-agents.git ~/Desktop/agency-agents
+git clone https://github.com/wangxuzhou666-arch/colar-agents.git ~/Desktop/colar-agents
 
 # 2. 同步全局通用 agent 到 ~/.claude/agents/
-bash ~/Desktop/agency-agents/scripts/sync-all.sh
+bash ~/Desktop/colar-agents/scripts/sync-all.sh
 
 # 3. 在项目里声明专项 agent
 cd <your-project>
 mkdir -p .claude
 # 创建 .claude/agent-config.yaml,写入需要的 agent slug
-bash ~/Desktop/agency-agents/scripts/sync-agents.sh "$(pwd)"
+bash ~/Desktop/colar-agents/scripts/sync-agents.sh "$(pwd)"
 ```
 
 如果你 fork 自用: 每个项目我只声明 4-7 个 agent,多了 Claude 选不准。

@@ -5,7 +5,7 @@ color: purple
 tools: WebFetch, WebSearch, Read, Write, Edit
 emoji: 🔭
 vibe: Spots emerging trends before they hit the mainstream.
-route-to-me-when: "任务命中市场情报/新兴趋势识别/竞品分析/机会评估时路由到我。我做对外市场与趋势调研，NOT 对内用户行为/可用性研究（那是 UX Researcher），NOT 产品 roadmap/生命周期决策（那是 Product Manager），NOT 私人创业 idea 战略评估（那是 VC 模型 Critic）。"
+route-to-me-when: "任务命中市场情报/新兴趋势识别/竞品分析/机会评估时路由到我。我做对外市场与趋势调研，NOT 对内用户行为/可用性研究，NOT 产品 roadmap/生命周期决策（UX Researcher / Product Manager 已于 2026-07-06 退役出部署，这两类任务主 loop 直接处理），NOT 私人创业 idea 战略评估（那是 VC 模型 Critic）。"
 ---
 
 # Product Trend Researcher Agent

@@ -36,10 +36,10 @@ source: session-derived (2026-06-30)
 
 ## Why This Skill Exists
 
-实战 2026-06-30（agency-agents 层 4 eval）：senior-developer 的 degradation-probe `sd-no-architect-overreach` 同 prompt 重跑出 PASS(4) / FAIL(1) ~50% 翻转。第一反应想收紧 criteria，但读两次 judge reasoning 发现——PASS 那次描述 agent "把方案标 conditional default 并甩回 architect"，FAIL 那次描述 agent "confidently 定全套 topology"。**是 agent 输出本身在飘，judge 各自打分都对**。于是改 senior-developer prompt 加 scope-boundary 规则（而非动 criteria），probe 从 ~50% → 3/3 PASS，3 个实现 case 零回归。教训：verdict 抖先辨来源，别条件反射改 criteria。
+实战 2026-06-30（colar-agents 层 4 eval）：senior-developer 的 degradation-probe `sd-no-architect-overreach` 同 prompt 重跑出 PASS(4) / FAIL(1) ~50% 翻转。第一反应想收紧 criteria，但读两次 judge reasoning 发现——PASS 那次描述 agent "把方案标 conditional default 并甩回 architect"，FAIL 那次描述 agent "confidently 定全套 topology"。**是 agent 输出本身在飘，judge 各自打分都对**。于是改 senior-developer prompt 加 scope-boundary 规则（而非动 criteria），probe 从 ~50% → 3/3 PASS，3 个实现 case 零回归。教训：verdict 抖先辨来源，别条件反射改 criteria。
 
 ## Related
 
-- agency-agents `eval/README.md` + `CLAUDE.md` 的「变异来源辨析」段（项目内 eval gate 文档）
+- colar-agents `eval/README.md` + `CLAUDE.md` 的「变异来源辨析」段（项目内 eval gate 文档）
 - `eval/run-eval.sh --case <id>` 单 case 重跑用于取样
 - `eval/run-eval.sh --agent <name>` 全量跑用于改 prompt 后查回归

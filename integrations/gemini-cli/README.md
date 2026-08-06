@@ -1,7 +1,7 @@
 # Gemini CLI Integration
 
 Packages all 61 Agency agents as a Gemini CLI extension. The extension
-installs to `~/.gemini/extensions/agency-agents/`.
+installs to `~/.gemini/extensions/colar-agents/`.
 
 ## Install
 
@@ -24,7 +24,7 @@ Use the frontend-developer skill to help me build this UI.
 ## Extension Structure
 
 ```
-~/.gemini/extensions/agency-agents/
+~/.gemini/extensions/colar-agents/
   gemini-extension.json
   skills/
     frontend-developer/SKILL.md

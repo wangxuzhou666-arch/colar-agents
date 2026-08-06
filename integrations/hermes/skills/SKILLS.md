@@ -4,7 +4,7 @@ Attach-on-demand 的 procedural skill 索引。每个 skill 是"当 X 触发 →
 
 **这是权威工作索引** —— `/capture-skill` 写时扫的就是它（查重 gate 读这里）。`colar-memory/MEMORY.md` 的 `## Skill Pilot` 段是 attach-率监测笔记，defer 到本文件。
 
-> 写时纪律：新 skill 必过 `/capture-skill` 的 4-类查重 gate（重复跳过 / 升级改旧 / 细化加 pointer / 正交新建）。落盘后 `/ship` 提交（skill 住 agency-agents project repo，version-controlled）。
+> 写时纪律：新 skill 必过 `/capture-skill` 的 4-类查重 gate（重复跳过 / 升级改旧 / 细化加 pointer / 正交新建）。落盘后 `/ship` 提交（skill 住 colar-agents project repo，version-controlled）。
 
 ## Skills
 

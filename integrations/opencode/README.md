@@ -10,7 +10,7 @@ than cluttering the primary agent picker.
 ```bash
 # Run from your project root
 cd /your/project
-/path/to/agency-agents/scripts/install.sh --tool opencode
+/path/to/colar-agents/scripts/install.sh --tool opencode
 ```
 
 This creates `.opencode/agents/<slug>.md` files in your project directory.

@@ -4,7 +4,7 @@
 # Reads: <project>/.claude/agent-config.yaml
 #
 # Cross-platform: MASTER_LIB is auto-detected from this script's location
-# (assumes scripts/ sits inside agency-agents/). Works on macOS (bash 3.2)
+# (assumes scripts/ sits inside colar-agents/). Works on macOS (bash 3.2)
 # and Windows Git Bash / WSL — no bash 4+ features used.
 
 set -uo pipefail
@@ -20,7 +20,7 @@ CONFIG="$PROJECT/.claude/agent-config.yaml"
 # Dual policy:
 #   user-level (~/.claude/agents) → symlink (live: editing master reflects instantly)
 #   project-level                 → cp     (snapshot: project pins a version, master edits don't leak in)
-# See agency-agents/CLAUDE.md "Agent 自动发现". Override with SYNC_MODE=link|copy if ever needed.
+# See colar-agents/CLAUDE.md "Agent 自动发现". Override with SYNC_MODE=link|copy if ever needed.
 if [[ "${SYNC_MODE:-}" == "link" ]]; then
   LINK_MODE=1
 elif [[ "${SYNC_MODE:-}" == "copy" ]]; then

@@ -56,7 +56,7 @@ TMP_PATHS="$(mktemp 2>/dev/null || echo "/tmp/drift-paths.$$")"
 } | sort -u > "$TMP_PATHS"
 
 soul_dir="$(dirname "$SOUL_ABS")"
-MEM_DIR="$HOME/.claude/projects/-Users-colar-Desktop-agency-agents/memory"
+MEM_DIR="$HOME/.claude/projects/-Users-colar-Desktop-colar-agents/memory"
 while IFS= read -r path || [ -n "$path" ]; do
     [ -z "$path" ] && continue
     case "$path" in
@@ -82,5 +82,8 @@ for h in "${HITS[@]}"; do
     echo "  $h"
 done
 echo ""
-echo "Action? [s]oul-fix  [m]emory-fix  [b]oth  [i]gnore-once  [w]hitelist (append to $WHITELIST)"
+# 纯提示文本(本脚本无 read 输入,交互式菜单是死 UI —— 2026-07-06 修)
+echo "修复选项(advisory,自行执行): 改 soul/SOUL.md · 改对应 memory 文件 · 或加白名单豁免:"
+echo "  echo 'BLACKLIST:<term>' >> $WHITELIST   # 豁免措辞条目"
+echo "  echo 'PATH:<path>'      >> $WHITELIST   # 豁免路径条目"
 exit 0

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-sync_repos.py — 一键同步 agency-agents + colar-memory 双 repo
+sync_repos.py — 一键同步 colar-agents + colar-memory 双 repo
 
 用法:
     python3 scripts/sync_repos.py "feat: 加 idea max mode"
@@ -9,7 +9,7 @@ sync_repos.py — 一键同步 agency-agents + colar-memory 双 repo
     python3 scripts/sync_repos.py --yes              # 跳过 public confirm
 
 环境变量(Windows 必配):
-    COLAR_AGENCY_REPO   默认 ~/Desktop/agency-agents
+    COLAR_AGENCY_REPO   默认 ~/Desktop/colar-agents
     COLAR_MEMORY_REPO   默认 ~/Desktop/colar-memory
 """
 import os
@@ -21,14 +21,14 @@ from datetime import date
 from pathlib import Path
 
 HOME = Path.home()
-AGENCY = Path(os.environ.get("COLAR_AGENCY_REPO", HOME / "Desktop" / "agency-agents"))
+AGENCY = Path(os.environ.get("COLAR_AGENCY_REPO", HOME / "Desktop" / "colar-agents"))
 MEMORY = Path(os.environ.get("COLAR_MEMORY_REPO", HOME / "Desktop" / "colar-memory"))
 HOSTNAME = socket.gethostname().split(".")[0].lower()
 
 # (路径, remote 必含子串, 期望可见性, add 策略)
 REPOS = [
     {
-        "name": "agency-agents",
+        "name": "colar-agents",
         "path": AGENCY,
         "remote_match": "colar-agents",
         "visibility": "PUBLIC",

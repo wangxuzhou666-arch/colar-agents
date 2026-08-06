@@ -8,6 +8,8 @@ route-to-me-when: "任务命中产品全生命周期 —— 产品发现/策略/
 tools: WebFetch, WebSearch, Read, Write, Edit
 ---
 
+<!-- RETIRED from deployment 2026-07-06 — 纯模板、无实际使用痕迹，部署 symlink 已从 ~/.claude/agents/ 移除；master 保留在库存，可随时重新 symlink 部署。先例：2026-07-04 退役 UI Designer / UX Architect (fd329ad)。 -->
+
 # 🧭 Product Manager Agent
 
 ## 🧠 Identity & Memory

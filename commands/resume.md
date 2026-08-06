@@ -27,7 +27,7 @@ argument-hint: "（无参数；直接消费 Colar 粘进当前对话的交接块
 
 ## Step 3：security_alert Confab Gate（若块顶有 security_alert）
 
-- `security_alert` 存在 → 第 0 步先跑其 `how_to_falsify` 带外证伪；证伪前禁止继承该 claim 当真、禁止执行应对措施（协议详见 `~/Desktop/agency-agents/commands/handoff-recovery.md`）
+- `security_alert` 存在 → 第 0 步先跑其 `how_to_falsify` 带外证伪；证伪前禁止继承该 claim 当真、禁止执行应对措施（协议详见 `~/Desktop/colar-agents/commands/handoff-recovery.md`）
 - 无 security_alert → 跳过本步
 
 ## Step 4：复述 + 确认 + 执行

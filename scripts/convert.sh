@@ -362,7 +362,7 @@ author: The Agency
 metadata:
   hermes:
     tags: [${category}]
-    source: agency-agents
+    source: colar-agents
 ---
 ${body}
 HEREDOC
@@ -613,7 +613,7 @@ main() {
         mkdir -p "$OUT_DIR/gemini-cli"
         cat > "$OUT_DIR/gemini-cli/gemini-extension.json" <<'HEREDOC'
 {
-  "name": "agency-agents",
+  "name": "colar-agents",
   "version": "1.0.0"
 }
 HEREDOC

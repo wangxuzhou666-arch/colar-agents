@@ -70,7 +70,7 @@ _frozen: <YYYY-MM-DD> · status: active_
 
 - 跑完所有 verify todo,客观信号全绿才算完。关键改动过 `/code-review` 或独立 review agent(同 context 自审有确认偏误)。
 - 把 plan status 改 `done`。
-- **回顾**:这次有没有返工/踩雷?有 → 一句话 lesson,`/capture-skill` 或写 `feedback_*.md`(把"想起来总结"变成默认动作,喂给 gap D)。
+- **回顾**:这次有没有返工/踩雷?有 → 一句话 lesson,`/capture-skill` 或写 `feedback_*.md`(把"想起来总结"变成收尾默认动作,不靠事后想起)。
 - 收尾一键化可直接走 `/ship`。
 
 ## 与其他机制的接口

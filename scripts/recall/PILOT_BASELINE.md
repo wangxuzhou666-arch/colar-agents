@@ -16,10 +16,10 @@
 
 ```bash
 # 每周跑 (推荐周日晚)
-python3 ~/Desktop/agency-agents/scripts/recall/pilot_audit.py --window 7d
+python3 ~/Desktop/colar-agents/scripts/recall/pilot_audit.py --window 7d
 
 # 2 周 final report
-python3 ~/Desktop/agency-agents/scripts/recall/pilot_audit.py --window 14d
+python3 ~/Desktop/colar-agents/scripts/recall/pilot_audit.py --window 14d
 ```
 
 **对比策略**: 看 `attach` 列在 cutoff (2026-05-24) **之后**的增量。`pilot_audit.py` 看的是全窗口,需手动剪掉 cutoff 之前的 trigger 数。下次升级 audit 脚本时加 `--cutoff 2026-05-24` 参数。

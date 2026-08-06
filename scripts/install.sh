@@ -13,12 +13,12 @@
 #   claude-code  -- Copy agents to ~/.claude/agents/
 #   copilot      -- Copy agents to ~/.github/agents/ and ~/.copilot/agents/
 #   antigravity  -- Copy skills to ~/.gemini/antigravity/skills/
-#   gemini-cli   -- Install extension to ~/.gemini/extensions/agency-agents/
+#   gemini-cli   -- Install extension to ~/.gemini/extensions/colar-agents/
 #   opencode     -- Copy agents to .opencode/agent/ in current directory
 #   cursor       -- Copy rules to .cursor/rules/ in current directory
 #   aider        -- Copy CONVENTIONS.md to current directory
 #   windsurf     -- Copy .windsurfrules to current directory
-#   openclaw     -- Copy workspaces to ~/.openclaw/agency-agents/
+#   openclaw     -- Copy workspaces to ~/.openclaw/colar-agents/
 #   hermes       -- Copy SOUL.md + skills to ~/.hermes/
 #   qwen         -- Copy SubAgents to ~/.qwen/agents/ (user-wide) or .qwen/agents/ (project)
 #   all          -- Install for all detected tools (default)
@@ -313,6 +313,30 @@ install_claude_code() {
     done < <(find "$REPO_ROOT/$dir" -name "*.md" -type f -print0)
   done
   ok "Claude Code: $count agents -> $dest"
+
+  # Slash commands + workflows: symlink bootstrap (SSOT lives in this repo;
+  # ~/.claude/{commands,workflows} entries are symlinks back to the master files,
+  # so edits here take effect immediately without re-running install).
+  local cmd_dest="${HOME}/.claude/commands"
+  local cmd_count=0
+  mkdir -p "$cmd_dest"
+  for f in "$REPO_ROOT"/commands/*.md; do
+    [[ -f "$f" ]] || continue
+    [[ "$(basename "$f")" == "README.md" ]] && continue
+    ln -sf "$f" "$cmd_dest/$(basename "$f")"
+    (( cmd_count++ )) || true
+  done
+  ok "Claude Code: $cmd_count commands (symlinks) -> $cmd_dest"
+
+  local wf_dest="${HOME}/.claude/workflows"
+  local wf_count=0
+  mkdir -p "$wf_dest"
+  for f in "$REPO_ROOT"/workflows/*.js; do
+    [[ -f "$f" ]] || continue
+    ln -sf "$f" "$wf_dest/$(basename "$f")"
+    (( wf_count++ )) || true
+  done
+  ok "Claude Code: $wf_count workflows (symlinks) -> $wf_dest"
 }
 
 install_copilot() {
@@ -354,7 +378,7 @@ install_antigravity() {
 
 install_gemini_cli() {
   local src="$INTEGRATIONS/gemini-cli"
-  local dest="${HOME}/.gemini/extensions/agency-agents"
+  local dest="${HOME}/.gemini/extensions/colar-agents"
   local count=0
   local manifest="$src/gemini-extension.json"
   local skills_dir="$src/skills"
@@ -389,7 +413,7 @@ install_opencode() {
 
 install_openclaw() {
   local src="$INTEGRATIONS/openclaw"
-  local dest="${HOME}/.openclaw/agency-agents"
+  local dest="${HOME}/.openclaw/colar-agents"
   local count=0
   [[ -d "$src" ]] || { err "integrations/openclaw missing. Run convert.sh first."; return 1; }
   mkdir -p "$dest"
@@ -430,7 +454,7 @@ install_hermes() {
   # Install skills
   local skills_src="$src/skills"
   if [[ -d "$skills_src" ]]; then
-    local dest_skills="$dest/skills/agency-agents"
+    local dest_skills="$dest/skills/colar-agents"
     mkdir -p "$dest_skills"
     local d
     while IFS= read -r -d '' d; do

@@ -44,7 +44,7 @@ argument-hint: "[一句话描述要 capture 的 procedure，可选 / --dry 只�
 
 ## Step 1 — 从 session 蒸馏 SKILL.md 草稿（先成稿，不写盘）
 
-从当前对话上下文提炼，填模板（对齐 `integrations/hermes/skills/*/SKILL.md` 现有 3 个）：
+从当前对话上下文提炼，填模板（对齐 `integrations/hermes/skills/*/SKILL.md` 现有格式，见 SKILLS.md 索引）：
 
 - `name`：kebab-case slug（如 `nextjs-hmr-proactive-restart`），= 目录名
 - `description`：**= When-to-Use 的触发语**，双语：中文为主 + 末尾一句 `Use when: ...` 英文触发条件（对齐现有 skill）。这是 attach 时唯一被读到的字段，必须把"何时该 attach 我"讲清
@@ -60,11 +60,13 @@ argument-hint: "[一句话描述要 capture 的 procedure，可选 / --dry 只�
 
 ### 2a 扫描（只读）
 
-读 `~/Desktop/agency-agents/integrations/hermes/skills/SKILLS.md` 索引 → 拿每个现存 skill 的 slug + 一句话 hook。
+读 `~/Desktop/colar-agents/integrations/hermes/skills/SKILLS.md` 索引 → 拿每个现存 skill 的 slug + 一句话 hook。
 对**语义相近的候选**（name/description 关键词重叠），再 Read 其 `SKILL.md` 的 frontmatter `description` 做精判。
 > 分层读取：先用索引行粗筛，命中候选才展开读 description，不盲读全部 SKILL.md 正文。
 
 ### 2b 4-类判定（复用 SOUL § SOUL↔Memory Sync 事前表）
+
+> ⚠️ **下表结构与 SOUL / `save-memory` 的 4-类表同源**（`save-memory` 持 memory 语境全文权威版）；此处仅把关系语境从 memory 特化为 skill（procedure 的触发/替代/子情形/无交集）。**4-类逻辑若演进，以 SOUL 为准同步此处**，别让三份副本漂移。
 
 | 关系 | 判断 | 处理 | 告知 Colar 话术 |
 |---|---|---|---|
@@ -79,7 +81,7 @@ argument-hint: "[一句话描述要 capture 的 procedure，可选 / --dry 只�
 
 ## Step 3 — 写盘（按 2b 判定动作）
 
-- 路径：`~/Desktop/agency-agents/integrations/hermes/skills/<slug>/SKILL.md`（version-controlled，与现有 3 个一致）
+- 路径：`~/Desktop/colar-agents/integrations/hermes/skills/<slug>/SKILL.md`（version-controlled，与现有 skill 一致，见 SKILLS.md 索引）
 - **新建前 guard**：`test -d <slug>` —— 目录已存在但 2b 判成了「正交」= dedup 漏判，停下回 Step 2 重判，**绝不覆盖**
 - **正交（新建）**：建目录 + 写 SKILL.md
 - **升级**（Colar 已 y）：Edit 已有 SKILL.md + `version` bump（`1.1.0` 细节增强 / `2.0.0` procedure 替换）
@@ -98,10 +100,10 @@ argument-hint: "[一句话描述要 capture 的 procedure，可选 / --dry 只�
 判断本 skill 是否**全局相关**（跨项目通用、属 axiom 级触发，如 `max-mode-protocol` 已进 SOUL）：
 
 - **是** → 产出**一条建议 pointer 行**让 Colar 决定，话术：
-  > 此 skill 全局相关，建议往 SOUL（`agency-agents/soul/SOUL.md` § Strategic Frameworks）加 pointer：
+  > 此 skill 全局相关，建议往 SOUL（`colar-agents/soul/SOUL.md` § Strategic Frameworks）加 pointer：
   > `- <一句话触发>：see integrations/hermes/skills/<slug>/SKILL.md`
   > 要 wire 进 SOUL 吗?(y/n)
-  → ⛔ **停等拍板，不自动改 `soul/SOUL.md`**（它 symlink 到 `~/.claude/CLAUDE.md`，是 axioms 层）
+  → ⛔ **停等拍板，不自动改 `soul/SOUL.md`**（axioms 层真身；`~/.claude/CLAUDE.md` 是指向它的软链）
 - **否**（项目局部 / attach-on-demand 足够）→ "SOUL impact: 无，靠 SKILLS 索引按需 attach 即可"
 
 > ⚠️ Step 5 是 v1 唯一的 retrieval 接线点（retrieval 半边沿用 pointer 模式，本版不做自动发现）。**别弱化它**——全局 skill 不 wire 进任何 pointer = capture 了但永远不被 attach，成孤儿。
@@ -113,40 +115,29 @@ argument-hint: "[一句话描述要 capture 的 procedure，可选 / --dry 只�
   SKILL.md:    integrations/hermes/skills/<slug>/SKILL.md
   SKILLS 索引:  +1 行 (或 不变)
   SOUL pointer: ⏸ 等你确认 (或 无需)
-  → 记得 /ship 把 agency-agents 这次改动 commit/push（skill 是 version-controlled）
+  → 记得 /ship 把 colar-agents 这次改动 commit/push（skill 是 version-controlled）
 ```
 
-> capture 只管"蒸馏 + 落盘 + 去重"，**不自己 commit/push**——那是 `/ship` 的 project lane 的事（skill 住 agency-agents project repo）。
+> capture 只管"蒸馏 + 落盘 + 去重"，**不自己 commit/push**——那是 `/ship` 的 project lane 的事（skill 住 colar-agents project repo）。
 
-## 硬规则
+## 硬规则（原硬规则 / 反 pattern / 不该做的 三段已去重合并于此）
 
-- ❌ 「升级」类改已有 SKILL.md → 停等 Colar 拍板，绝不自动覆盖
-- ❌ 绝不自动改 SOUL（`agency-agents/soul/SOUL.md`）——只提议 pointer，Colar 拍板
-- ❌ Step 0 值得 gate 不过 → 不 capture，宁缺毋滥（主动遗忘纪律）
+- ⛔ judgment 步骤 gated：「升级」改已有 SKILL.md / wire SOUL pointer → 只提 diff，停等 Colar 拍板，绝不自动改（SOUL 真身 `soul/SOUL.md`）、绝不自动覆盖
+- ❌ Step 0 值得 gate 不过 → 不 capture，宁缺毋滥（主动遗忘纪律；一次性 / 显而易见操作不进 skill）
+- ❌ 不 commit/push——那是 `/ship` 的事
+- ❌ skill = procedure（触发→步骤）；事实 / 偏好 / 决策 → 退回 semantic memory（`/ship` save memory），双向不混（procedural vs semantic 分离）
 - ❌ `source` 日期只采信 `[time-context::hook-only]`；hook UNAVAILABLE → 不戳日期
 - ❌ 不在 chat 粘 SKILL.md 全文——只列路径 + 一句话（SOUL 过程产物纪律）
 - ✅ 查重 gate（Step 2）永不跳过，即使 `--dry` 也跑
-- ✅ skill = procedure（触发→步骤）；事实 / 偏好 / 决策 → 退回 semantic memory（`/ship` save memory）
-- ✅ name/description 双语对齐现有 3 个 skill（中文 + 末句 `Use when:` 英文）
+- ✅ name/description 双语对齐现有 skill（中文 + 末句 `Use when:` 英文，见 SKILLS.md 索引）
 
-## 反 pattern（落盘前自检）
+## 反 pattern（落盘前自检 — 只列硬规则未覆盖的生成质量项）
 
 | 反 pattern | 为什么坏 |
 |---|---|
-| 把一次性操作 capture 成 skill | 攒垃圾，违反主动遗忘纪律 |
-| 跳过查重直接新建 | 与已有 skill 重复 / 语义重叠，索引腐烂 |
 | description 写成"这个 skill 干啥"而非"何时 attach 我" | attach 判断失效，永远不被触发 |
-| 自动改 SOUL / 自动 commit | 越权，judgment 步骤未 gated |
 | Procedure 写成抽象总结无可 exec 步骤 | 下个 session 照不了，等于没 capture |
-| 把事实 / 偏好塞进 skill | 该进 semantic memory，类型错位 |
 | `source` 字段空 / 戳相对日期 | 蒸馏来源丢失，无法回溯 |
-
-## 不该做的
-
-- ❌ 不替 Colar 决定升级已有 skill / wire SOUL——只提 diff，他拍板
-- ❌ 不 commit/push——那是 `/ship` 的事
-- ❌ 不 capture 一次性 / 显而易见操作——主动遗忘
-- ❌ 不把 skill 内容写进 semantic memory（反之亦然）——procedural vs semantic 分离
 
 ---
 

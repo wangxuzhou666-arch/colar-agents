@@ -5,13 +5,13 @@ argument-hint: "[idea 描述] [--shadow=v0.7-draft]"
 
 # /vc模型 — 启动 idea 评估对话
 
-调用 **VC 模型 Critic** agent（`idea-vc-critic`），进入 CONFIDENTIAL 模式与 Colar 讨论一个创业 idea。
+调用 **VC 模型 Critic** agent（Agent tool 运行时注册名即 `VC 模型 Critic`），进入 CONFIDENTIAL 模式与 Colar 讨论一个创业 idea。
 
 ## 用法
 
 - `/vc模型 我有个 idea：XXX` — 直接进入评估
 - `/vc模型` — 不带 idea 时由 agent 主动询问
-- `/vc模型 XXX --shadow=v0.7-draft` — 双跑 v0.6 stable + v0.7 draft 对比（升级阶段使用）
+- `/vc模型 XXX --shadow=v0.7-draft` — 双跑 v0.6 stable + v0.7 draft 对比（升级阶段使用；**当前无 v0.7 draft，此参数暂无效**）
 
 ## Agent 启动行为
 
@@ -36,4 +36,4 @@ agent 不内嵌 framework 内容，每次启动从 MANIFEST → spec 实时读�
 
 ---
 
-请使用 `idea-vc-critic` agent 处理用户的请求：$ARGUMENTS
+请使用 `VC 模型 Critic` agent 处理用户的请求：$ARGUMENTS

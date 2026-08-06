@@ -24,7 +24,7 @@
 import argparse, sqlite3, time, pathlib, re
 
 DB = pathlib.Path.home() / ".claude/recall.db"
-MEM_DIR = pathlib.Path.home() / ".claude/projects/-Users-colar-Desktop-agency-agents/memory"
+MEM_DIR = pathlib.Path.home() / ".claude/projects/-Users-colar-Desktop-colar-agents/memory"
 NOW = int(time.time())
 
 # 这些文件是 index / 模板 / 入口, 不参与 prune 评估

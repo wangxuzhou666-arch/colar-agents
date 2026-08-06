@@ -88,7 +88,7 @@ See [antigravity/README.md](antigravity/README.md) for details.
 ## Gemini CLI
 
 Agents are packaged as a Gemini CLI extension with individual skill files.
-The extension is installed to `~/.gemini/extensions/agency-agents/`.
+The extension is installed to `~/.gemini/extensions/colar-agents/`.
 Because the Gemini manifest and skill folders are generated artifacts, run
 `./scripts/convert.sh --tool gemini-cli` before installing from a fresh clone.
 
@@ -106,7 +106,7 @@ See [gemini-cli/README.md](gemini-cli/README.md) for details.
 Each agent becomes a project-scoped `.md` file in `.opencode/agents/`.
 
 ```bash
-cd /your/project && /path/to/agency-agents/scripts/install.sh --tool opencode
+cd /your/project && /path/to/colar-agents/scripts/install.sh --tool opencode
 ```
 
 See [opencode/README.md](opencode/README.md) for details.
@@ -119,7 +119,7 @@ Each agent becomes a `.mdc` rule file. Rules are project-scoped — run the
 installer from your project root.
 
 ```bash
-cd /your/project && /path/to/agency-agents/scripts/install.sh --tool cursor
+cd /your/project && /path/to/colar-agents/scripts/install.sh --tool cursor
 ```
 
 See [cursor/README.md](cursor/README.md) for details.
@@ -132,7 +132,7 @@ All agents are consolidated into a single `CONVENTIONS.md` file that Aider
 reads automatically when present in your project root.
 
 ```bash
-cd /your/project && /path/to/agency-agents/scripts/install.sh --tool aider
+cd /your/project && /path/to/colar-agents/scripts/install.sh --tool aider
 ```
 
 See [aider/README.md](aider/README.md) for details.
@@ -145,7 +145,7 @@ All agents are consolidated into a single `.windsurfrules` file for your
 project root.
 
 ```bash
-cd /your/project && /path/to/agency-agents/scripts/install.sh --tool windsurf
+cd /your/project && /path/to/colar-agents/scripts/install.sh --tool windsurf
 ```
 
 See [windsurf/README.md](windsurf/README.md) for details.
