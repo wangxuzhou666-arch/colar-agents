@@ -47,7 +47,11 @@ const numArg = (v, dflt) => (typeof v === 'number' && Number.isFinite(v) && v >=
 
 const CTX = (A && A.context) ? `\n\n## 已知上下文（视为事实，不要重新质疑其存在性）\n${A.context}` : ''
 const EVAL = !!(A && A.evalMode)
-const VOTES = Math.max(1, numArg(A && A.verifyVotes, 1))
+// VOTES 强制取奇数（2026-08-08）：多数判据 `hard > vs.length/2` 在偶数票下退化成**要求全票**
+// —— VOTES=2 时需 2/2，比 VOTES=1 更难杀假 claim 却贵一倍，是纯粹的陷阱档位。
+// 向上取奇（2→3）保留"收紧检方"的语义方向，只消除这个边界。
+const RAW_VOTES = Math.max(1, numArg(A && A.verifyVotes, 1))
+const VOTES = RAW_VOTES % 2 === 0 ? RAW_VOTES + 1 : RAW_VOTES
 const VERIFY_LEVELS = (A && A.verifyLow) ? ['HIGH', 'MEDIUM', 'LOW'] : ['HIGH', 'MEDIUM']
 const BUDGET_FLOOR = numArg(A && A.budgetFloor, 50000)
 const HARD_ROUND_CAP = 12 // runaway 兜底：即使预算充足也不超过这么多轮
@@ -141,6 +145,15 @@ const CONFIDENTIAL_RULE = CONFIDENTIAL ? `
 - ❌ 禁用 WebSearch / WebFetch —— 问题里的关键词不得外泄到任何外部服务。
 - 引用问题内容时用抽象描述，不要逐字复制可识别的专有名词/公司名/技术栈组合。
 - 因此查不了的 claim 直接标 UNVERIFIED 并写清缺什么证据，绝不为了补证据走外部检索。` : ''
+
+// critic 与 synthesize 也是**不继承任何调用方约束的通用 subagent**，而它们的 prompt 同样拼了原问题 Q。
+// 2026-08-08 第一版只把保密条款接进 GROUND_RULES（panel prompt）和 verify prompt，漏了这两条通道 ——
+// 保密 run 下问题原文照样流进两个没有禁 web 条款的 agent。这是"只堵一半"的典型，补齐。
+const CONFIDENTIAL_NOTE = CONFIDENTIAL ? `
+
+## 保密硬约束（本次 run 置位 confidential:true）
+❌ 禁用 WebSearch / WebFetch —— 上面的问题与专家产出不得外泄到任何外部服务。
+你的任务是整合已有材料，不需要也不允许外部检索；材料不足就如实说不足。` : ''
 
 const GROUND_RULES = `
 ## 输出纪律（违反即视为低质量产出）
@@ -319,6 +332,7 @@ else throw new Error('expert-panel: 未传 experts 也未传 generic:true ——
 // ───────────────────────── 主循环：多轮深挖（maxRounds / depth 驱动，budget 只当闸）─────────────────────────
 log(`expert-panel: seed ${SEED_EXPERTS.length} 专家｜evalMode=${EVAL}｜verifyVotes=${VOTES}｜verifyLow=${!!(A && A.verifyLow)}｜confidential=${CONFIDENTIAL}｜depth=${DEPTH}｜maxRounds=${MAX_ROUNDS}｜budget=${budget && budget.total ? Math.round(budget.total / 1000) + 'k' : 'none'}`)
 
+if (RAW_VOTES !== VOTES) log(`ℹ️ verifyVotes ${RAW_VOTES} → ${VOTES}（强制取奇：偶数票下 "HARD 过半" 退化成要求全票，比少一票更难杀假 claim 却贵一倍）`)
 if (castMode === 'generic-optin') log(`ℹ️ generic:true —— 按显式请求用了通用默认盘（${GENERIC_PANEL.map(e => e.agentType || e.role).join('/')}），非按题选人。`)
 
 const allResults = []
@@ -375,7 +389,7 @@ ${JSON.stringify(allResults.filter(r => r.round < round).map(r => ({ expert: r.e
 1. 找真实 gap：哪些关键视角没人覆盖？哪些重大 claim 还没被验证？哪种查证方式（市场/技术/法务/成本/分发…）还没跑？
 2. 宁缺毋滥：只有当新增专家能带来「目前完全没有的」边际信息时才 complete=false。重复已覆盖的视角 = 为多而多 = 禁止。
 3. 若覆盖已足够，complete=true，nextExperts 留空。
-4. nextExperts 里每个角色必须对应一个具体 gap，lens 写清这一轮要它专门挖什么。`,
+4. nextExperts 里每个角色必须对应一个具体 gap，lens 写清这一轮要它专门挖什么。${CONFIDENTIAL_NOTE}`,
     { label: `critic#r${round}`, phase: 'Critic', schema: CRITIC_SCHEMA }
   )
 
@@ -406,7 +420,14 @@ if (!clean.length) {
 // 反证的可核验锚点：file:line / URL / 命令输出 / 具体数字。
 // 实测 617 条 REFUTED 中 90.1% 自称 HARD，而旧代码从不校验 —— 约 17% 已验证 claim 被
 // 单个未经审计的裁判杀掉。可机器判定的规则不留在散文层（散文层已被实证无效）。
-const EVIDENCE_MARK = /([\w./-]+\.[A-Za-z]{1,5}:\d+|https?:\/\/|```|\$\s|\bgrep\b|\brg\b|\bls\b|\bwc\b|\bsed\b|\bawk\b|\d{2,}\s*(条|次|个|行|%))/i
+// 2026-08-08 收紧（第一版写太松，实测把纯推理判成硬证据 —— 等于给空口反证发了杀权）：
+//   「参考 12 次运行的印象」    命中旧的 \d{2,}\s*次
+//   「roughly 25% of cases, from memory」 命中旧的 %
+//   「an ls of the repo shows nothing」   命中旧的 \bls\b
+// 裸数字和裸命令词在自然语言里几乎必然误命中，已删。命令词改为必须跟参数
+// （"grep -n foo" 算证据，"我没有 grep 过" 不算）。
+// 失败方向刻意偏保守：宁可把真证据判成 WEAK（只是不杀、降 CONTESTED），也不放行空口 HARD。
+const EVIDENCE_MARK = /([\w./-]+\.[A-Za-z]{1,5}:\d+|https?:\/\/|```|\b(grep|rg|sed|awk|git|node|python3?)\s+[-\w'"/.]|\$\s+\w)/i
 const effectiveStrength = v =>
   v.verdict !== 'REFUTED' ? 'NA'
     : (v.refutationStrength === 'HARD' && EVIDENCE_MARK.test(String(v.reason || ''))) ? 'HARD'
@@ -482,7 +503,7 @@ ${JSON.stringify(KILLED_LIST, null, 2)}
 3. 真实分歧必须放进 tensions 保留 —— 严禁为了"给个干净答案"把对立观点压平成虚假共识。
 4. 禁止附和提问者的既有立场。若 KEPT 证据整体指向提问者不想听的结论，明确说出来。
 5. agreements 只放"多个专家各自独立得出"的点，不是一个专家说、其他没反对。
-${VOTES === 1 ? '6. 本次 verifyVotes=1：每条驳倒判决只有一个未经审计的裁判，请在 decision 里对这一点给出显式折扣提示。' : ''}${EVAL ? '\n7. decision 给 Floor / Base / Optimal 三档。' : ''}`,
+${VOTES === 1 ? '6. 本次 verifyVotes=1：每条驳倒判决只有一个未经审计的裁判（且单票不足以判 REFUTED，最多降 CONTESTED），请在 decision 里对这一点给出显式折扣提示。' : ''}${EVAL ? '\n7. decision 给 Floor / Base / Optimal 三档。' : ''}${CONFIDENTIAL_NOTE}`,
   { label: 'synthesize', phase: 'Synthesize', schema: SYNTH_SCHEMA }
 )
 
