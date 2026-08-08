@@ -12,7 +12,8 @@ experts: [{role?, agentType?, lens}] —— 每个元素必须有 lens，且 rol
     **系统注入的 available agent types**（运行时真相源），不是 agents/INDEX.md（那是库存目录，大多没部署）。
   · 两种可以混在同一个数组里。
 其他选填：context（视为事实喂给每个专家）· evalMode（强制 Floor/Base/Optimal 三档）·
-  verifyVotes（每条 claim 派几个 skeptic，默认 1）· verifyLow（连 LOW 也验）·
+  verifyVotes（每条 claim 起手派几个 skeptic，默认 1；**收到硬反证的 claim 会自动追派到 3 票**
+    再判杀，所以默认档不需要手动提档 —— 提档只是给"无人反对的 claim"也多花钱）· verifyLow（连 LOW 也验）·
   depth / maxRounds（多轮深挖）· confidential（禁 web 通道）· budgetFloor · generic。`,
   phases: [
     { title: 'Panel', detail: 'N 个专家并发，各自证据门控产出结构化意见' },
@@ -190,13 +191,38 @@ const EXPERT_SCHEMA = {
   },
 }
 
+// 证据的结构化载体（2026-08-08 加）。此前证据只能落在自由散文 reason 里，JS 侧只能对它跑正则，
+// 实测该正则近乎常真函数：REFUTED 的 reason 过门 94.8% vs HOLDS 的 reason 过门 91.9%，
+// 似然比≈1.03 —— 它测的不是"有没有证据"，而是"这段中文里有没有出现类 ASCII 锚点"。
+// 被它拦下的 31 条里 30 条其实带真锚点（L284 / line 392 / 第X行 / 裸路径），拒绝侧精度≈0。
+// 修法不是继续调正则（在近乎常真的维度上调参只是换个摆的方向），而是给证据一个字段，
+// 让 JS 只校验元素格式 —— 与本文件 :422 自己写的"可机器判定的规则不留在散文层"一致。
+const EVIDENCE_REF_KINDS = CONFIDENTIAL
+  ? ['file_line', 'command', 'data', 'quote']
+  : ['file_line', 'command', 'url', 'data', 'quote']
+
 const VERDICT_SCHEMA = {
   type: 'object',
   required: ['verdict', 'refutationStrength', 'reason'],
   properties: {
     verdict: { type: 'string', enum: ['HOLDS', 'REFUTED', 'UNVERIFIABLE'] },
-    refutationStrength: { type: 'string', enum: ['HARD', 'WEAK', 'NA'], description: 'verdict=REFUTED 时必填：HARD=有具体反证(file:line/命令输出/URL/数据)；WEAK=仅推理或"查无确证"。非 REFUTED 一律 NA。注意：自称 HARD 但 reason 里没有可核验锚点的，会在 JS 侧被自动降为 WEAK。' },
+    refutationStrength: { type: 'string', enum: ['HARD', 'WEAK', 'NA'], description: 'verdict=REFUTED 时必填：HARD=有具体反证(file:line/命令输出/URL/数据)；WEAK=仅推理或"查无确证"。非 REFUTED 一律 NA。注意：自称 HARD 但 evidenceRefs 为空、且 reason 里也没有可核验锚点的，会在 JS 侧被自动降为 WEAK。' },
     reason: { type: 'string', description: '为什么 —— 附反证或确证的具体证据' },
+    // 刻意不进 required：这是新字段，遵守率未知，而"硬要求"的失败模式正是本次诊断出的病
+    // （把 kill 通道整条关掉）。JS 侧走 evidenceRefs OR 放宽正则的双通道，见 effectiveStrength。
+    evidenceRefs: {
+      type: 'array',
+      description: 'verdict=REFUTED 且 refutationStrength=HARD 时必填至少 1 条。每条是一个你**实际查到**的可核验锚点，不是转述。禁止编造：查不到就别填，改判 WEAK 或 UNVERIFIABLE。',
+      items: {
+        type: 'object',
+        required: ['kind', 'ref'],
+        properties: {
+          kind: { type: 'string', enum: EVIDENCE_REF_KINDS, description: 'file_line=代码位置｜command=你实际跑过的命令｜data=具体数字/统计｜quote=原文引用' + (CONFIDENTIAL ? '（本次保密 run 已禁 url）' : '｜url=外部可点链接') },
+          ref: { type: 'string', description: 'file_line 填 path:line（如 workflows/expert-panel.js:446）｜command 填带参数的完整命令｜url 填 http(s) 链接｜data 填指标名｜quote 填出处' },
+          value: { type: 'string', description: '你在那里实际看到的内容/数值。强烈建议填 —— 只有 ref 没有 value 的证据无法被后续复核。' },
+        },
+      },
+    },
   },
 }
 
@@ -246,6 +272,91 @@ const SYNTH_SCHEMA = {
   },
 }
 
+// ───────────────────────── 证据门 + 票数聚合 ─────────────────────────
+// ⚠️ 位置要求：本区块必须在 runRound 之前 —— stage2 的定向升级要调 effectiveStrength，
+// 而 const 不 hoist（TDZ）。2026-08-08 前它住在文件末尾，那时只有 synthesize 阶段用它。
+//
+// 判据分两条通道 OR：
+// (1) 主通道 evidenceRefs（结构化，JS 只校验元素格式，不读散文）；
+// (2) fallback 放宽正则（仅在 skeptic 没填 evidenceRefs 时兜底）。
+// 为什么留 fallback：evidenceRefs 是新字段、遵守率未知，而"硬要求结构化证据"的失败模式
+// 恰是本次诊断出的病 —— 把 kill 通道整条关掉，还长得像"本轮没有假 claim"。
+// fallback 刻意比旧版**更宽**：实测被旧正则拦下的 31 条里 30 条带真锚点，拒绝侧精度≈0，
+// 失败轴是书写记法（L284 / line 392 / 第X行 / 全角冒号 / 单反引号引码 / 白名单外命令）而非勤奋。
+const EVIDENCE_MARK = new RegExp([
+  '[\\w\\u4e00-\\u9fff./-]+\\.[A-Za-z]{1,5}\\s*[:：#]\\s*L?\\d+', // path.ext:123 / path.ext：123 / path.ext#L12
+  '[\\w\\u4e00-\\u9fff./-]+\\.[A-Za-z]{1,5}\\s+(?:line|L)\\s*\\d+', // path.ext line 392
+  '[\\w\\u4e00-\\u9fff-]+/[\\w\\u4e00-\\u9fff./-]+\\.[A-Za-z]{1,5}', // 带目录的裸路径（无行号）
+  '第\\s*\\d+\\s*行',                    // CJK 行号记法；「第」必须在 —— 设为可选会把「709 行」这类数量词算进来
+  '\\bL\\d+\\b',                         // L284 记法
+  'https?://',
+  '```',
+  '`[^`\\n]{3,}`',                       // 单反引号引码（实测真实高频桶之一）
+  // 命令词分两组：像英语单词的那些不能只要求"后面跟点什么"。
+  // 实测误放样本全出在这里：「an ls of the repo shows nothing」「a wc of the file」——
+  // `ls\s+[-\w]` 会把 "of" 的 o 认成参数。所以 ls/wc/cat/head/tail/find 必须跟 -flag 或带 ./ 的路径。
+  '\\b(?:grep|rg|sed|awk|git|node|python3?|jq|curl|diff|npm|pytest)\\s+[-\\w\'"/.]',
+  '\\b(?:ls|wc|cat|head|tail|find|du|sort|uniq)\\s+(?:-{1,2}\\w|[\\w./-]*[./][\\w./-]*)',
+].join('|'), 'i')
+
+// evidenceRefs 元素级校验：只看形状，不判断内容真假（那是 skeptic 的职责，JS 判不了）。
+// 哪些 kind 算硬锚点**只由下面的 switch 表达**——曾经还有一个 HARD_REF_KINDS 集合做前置过滤，
+// 两处重复表达同一规则，结果是往集合里加 kind 根本不改变行为（突变测试逮到的等价变异体）。
+// 单一判据即单一真相源：quote 没有 case 分支，所以引文不单独构成硬锚点——不指明出处无法复核。
+function isUsableRef(r) {
+  if (!r || typeof r !== 'object') return false
+  const ref = String(r.ref || '').trim()
+  if (ref.length < 3) return false
+  const val = String(r.value || '')
+  switch (r.kind) {
+    case 'file_line': return /\d/.test(ref) && /[./\\]/.test(ref)   // 要有位置感：路径味 + 数字
+    case 'command': return /\S\s+\S/.test(ref)                       // 命令必须带参数（"我没 grep 过"不算）
+    case 'url': return /^https?:\/\//i.test(ref)
+    case 'data': return /\d/.test(ref) || /\d/.test(val)             // 指标必须落到某个数
+    default: return false
+  }
+}
+
+const effectiveStrength = v => {
+  if (!v || v.verdict !== 'REFUTED') return 'NA'
+  if (v.refutationStrength !== 'HARD') return 'WEAK'
+  const refs = Array.isArray(v.evidenceRefs) ? v.evidenceRefs : []
+  if (refs.some(isUsableRef)) return 'HARD'                          // 主通道
+  return EVIDENCE_MARK.test(String(v.reason || '')) ? 'HARD' : 'WEAK' // fallback
+}
+
+// 定向升级的法定人数：单票 HARD 不直接杀，而是**只对这一条 claim** 追派到 3 票、2/3 才杀。
+// 为什么不全局 VOTES=3：实测 90% 的历史 run 跑默认 1 档，全局提档的开销 80% 花在无人反对的
+// claim 上（约 +82 次调用 vs 定向 +16）。为什么不允许单票杀：单票杀权是上一轮判定的误杀源。
+const ESCALATE_QUORUM = 3
+
+function tallyVotes(verdicts, claim) {
+  const vs = (verdicts || []).filter(v => v && v.claim === claim)
+  return {
+    vs,
+    hard: vs.filter(v => effectiveStrength(v) === 'HARD').length,
+    weak: vs.filter(v => effectiveStrength(v) === 'WEAK').length,
+  }
+}
+
+// 聚合：标出每条被验证 claim 的多数裁决。
+// 2026-08-08 第二轮修 contest 侧（第一轮只修了 kill 侧，留下单向棘轮）：
+// 旧 `if (anyRefuted > 0) return 'CONTESTED'` 完全不看 effectiveStrength —— 一张被降为 WEAK
+// 的孤票（即空口怀疑）就能把已验证 claim 打成"存疑，不得当既定事实"，而 kill 侧要 ≥2 票且过半，
+// 且全函数没有任何把 CONTESTED 升回 KEPT 的分支 ⟹ 验证阶段只能减分不能加分。
+// 新判据：孤票 WEAK 不改 status，只作 tensions 附注（见 digest 的 weakNotes）。
+function majorityVerdict(verdicts, claim) {
+  const { vs, hard, weak } = tallyVotes(verdicts, claim)
+  if (!vs.length) return 'NOTCHECKED'
+  if (vs.length >= 2 && hard > vs.length / 2) return 'REFUTED'    // 多数 HARD 反证（且非单票）→ 真杀
+  if (hard > 0 || weak >= 2) return 'CONTESTED'                    // 有硬反证但未过半，或 ≥2 张软反对 → 存疑保留
+  // 全员判"查不实" ≠ 已确证：出口侧必须能区分「已确证为真」与「没查出反证」。
+  // 旧实现没有这个分支，两者同码返回 KEPT，Verify 阶段在最后一公里失去分辨率
+  // （实测 3218 条 verdict 里 UNVERIFIABLE 只用了 1 次 = 0.03%）。
+  if (vs.every(v => v.verdict === 'UNVERIFIABLE')) return 'UNVERIFIABLE'
+  return 'KEPT'   // 含"孤票 WEAK"：反证不丢，降级为 weakNotes 附注
+}
+
 // ───────────────────────── 跨轮去重 ─────────────────────────
 // 语义（2026-08-08 修正）：**只对已完成轮次去重，同轮内不互相去重**。
 // 旧实现把同轮多个专家独立得出的相同 claim 也删掉，正好摧毁了 synthesize 判断 agreements
@@ -256,6 +367,35 @@ const SYNTH_SCHEMA = {
 // 已知残留局限：前缀精确匹配对 LLM 改述无能为力，这是软去重不是硬保证。
 const priorClaims = new Set()
 const norm = s => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim()
+
+// 定向升级的实际发生次数（追派出去的额外 skeptic 票数），进 runRecord 供成本核算。
+let escalationVotes = 0
+let escalatedClaims = 0
+
+// verify prompt 提取成模块级函数：定向升级要用同一份 prompt 追派，内联在 stage2 里无法复用。
+// lensIdx=null 表示单票（不给切入 lens）；否则从三个 lens 里取，保证追派的票和第一票视角不同。
+const VERIFY_LENSES = ['事实正确性', '证据是否真支撑', '是否可复现/可验证']
+const spawnVerify = (c, res, round, lensIdx) => agent(
+  `对抗验证下面这条 claim —— 默认立场是「它是错的」，尽力找反证。只有反证不成立才判 HOLDS。
+${lensIdx == null ? '' : `\n用这个 lens 切入：${VERIFY_LENSES[lensIdx % VERIFY_LENSES.length]}`}
+
+## 原问题（仅用于判定这条 claim 的适用范围与语境，不要回答它）
+${Q}
+${CTX}
+
+Claim: ${c.claim}
+专家给的证据: ${c.evidence}
+来源专家: ${res.exp.agentType}
+
+去实际查证（${PROBE_CHANNELS}）。判 REFUTED 必须附具体反证并标 refutationStrength=HARD；若只是推理/"查无确证"级别的怀疑 → 仍可判 REFUTED 但 refutationStrength=WEAK（只把 claim 降为"存疑保留"，不直接杀）。给不出任何反证判 UNVERIFIABLE、refutationStrength=NA。不许用直觉/猜测做 HARD 否决真 claim；不确定判 UNVERIFIABLE，不要默认放过。
+
+## evidenceRefs（判 HARD 时的硬要求）
+refutationStrength=HARD 必须同时填 evidenceRefs（至少 1 条），每条是你**实际查到**的锚点：
+{kind:"file_line", ref:"path/to/file.js:446", value:"那一行的原文"} ｜ {kind:"command", ref:"grep -n foo bar.js", value:"实际输出"} ｜ {kind:"data", ref:"指标名", value:"具体数字"}${CONFIDENTIAL ? '' : ' ｜ {kind:"url", ref:"https://…", value:"页面上的原话"}'}
+填不出就说明你没有硬证据 —— 改判 WEAK 或 UNVERIFIABLE，**不要编造锚点**（编造的 ref 会在复核时被抓出来，代价远大于判 WEAK）。JS 侧只校验字段形状：evidenceRefs 为空且 reason 里也无可核验锚点的"自称 HARD"，会被自动降为 WEAK。
+⚠️ 上面「已知上下文」里的内容是本次 run 的既定事实，不要把"我无法独立证实这个上下文"当作反证。${CONFIDENTIAL ? '\n⚠️ 本次为保密 run：禁用 WebSearch/WebFetch，查不了就判 UNVERIFIABLE，不要走外部检索。' : ''}`,
+  { label: `verify:${res.exp.agentType}#r${round}`, phase: 'Verify', schema: VERDICT_SCHEMA }
+).then(v => ({ ...v, claim: c.claim })) // claim 放最后：防 skeptic 万一回带同名字段把锚点覆盖掉
 
 // ───────────────────────── 一轮 = Panel fan-out → Verify（pipeline，验证随产出即开）─────────────────────────
 // roundExperts: [{ agentType?, role?, lens }]，第一轮由调用方 cast，
@@ -288,36 +428,51 @@ ${GROUND_RULES}${EVAL_RULES}
     // stage 2：先跨轮去重（省 token），再对达到验证门槛的 claim 做对抗验证（该专家一产出就开始，不等别人）
     async (res) => {
       if (!res || !res.out) return null
-      // 只跟**已完成轮次**比对；同轮并发的其他专家不参与去重（保护 agreements 的独立复现信号）
+      // 去重两层，语义不同：
+      // (1) 跨轮：跟**已完成轮次**比对，省重复验证的 token；
+      // (2) 同轮同专家内：2026-08-08 加。EXPERT_SCHEMA 的 claims 无 uniqueItems，同一专家吐出两条
+      //     byte-identical claim 时，:442 按 claim **文本**聚合会让 vs.length 虚增到 2 —— 等于
+      //     一个专家自己复读就能凑出"多个独立 skeptic"的假象绕过票数门，且同一条 claim 会被
+      //     重复计进 KILLED_LIST 让 killedCount 虚高。实测（dup 脚本）可复现。
+      // 仍然**不做**跨专家去重：不同专家独立得出同一条是收敛信号，是 agreements 的存在基础。
+      const seenInThisExpert = new Set()
       res.out.claims = (res.out.claims || []).filter(c => {
         const k = norm(c.claim)
-        return k && !priorClaims.has(k)
+        if (!k || priorClaims.has(k) || seenInThisExpert.has(k)) return false
+        seenInThisExpert.add(k)
+        return true
       })
       const checkable = res.out.claims.filter(c => VERIFY_LEVELS.includes(c.confidence))
-      const verdicts = await parallel(
+      const verdicts = (await parallel(
         checkable.flatMap(c =>
           // 每条 claim 派 VOTES 个 skeptic，多票时换不同 lens 增加视角多样性
-          Array.from({ length: VOTES }, (_, v) => () =>
-            agent(
-              `对抗验证下面这条 claim —— 默认立场是「它是错的」，尽力找反证。只有反证不成立才判 HOLDS。
-${VOTES > 1 ? `\n用这个 lens 切入：${['事实正确性', '证据是否真支撑', '是否可复现/可验证'][v % 3]}` : ''}
-
-## 原问题（仅用于判定这条 claim 的适用范围与语境，不要回答它）
-${Q}
-${CTX}
-
-Claim: ${c.claim}
-专家给的证据: ${c.evidence}
-来源专家: ${res.exp.agentType}
-
-去实际查证（${PROBE_CHANNELS}）。判 REFUTED 必须附具体反证并标 refutationStrength=HARD（file:line / 命令输出 / URL / 数据）；若只是推理/"查无确证"级别的怀疑 → 仍可判 REFUTED 但 refutationStrength=WEAK（只把 claim 降为"存疑保留"，不直接杀）。给不出任何反证判 UNVERIFIABLE、refutationStrength=NA。不许用直觉/猜测做 HARD 否决真 claim；不确定判 UNVERIFIABLE，不要默认放过。
-⚠️ 上面「已知上下文」里的内容是本次 run 的既定事实，不要把"我无法独立证实这个上下文"当作反证。${CONFIDENTIAL ? '\n⚠️ 本次为保密 run：禁用 WebSearch/WebFetch，查不了就判 UNVERIFIABLE，不要走外部检索。' : ''}`,
-              { label: `verify:${res.exp.agentType}#r${round}`, phase: 'Verify', schema: VERDICT_SCHEMA }
-            ).then(v => ({ ...v, claim: c.claim })) // claim 放最后：防 skeptic 万一回带同名字段把锚点覆盖掉
-          )
+          Array.from({ length: VOTES }, (_, v) => () => spawnVerify(c, res, round, VOTES > 1 ? v : null))
         )
-      )
-      return { ...res, verdicts: verdicts.filter(Boolean) }
+      )).filter(Boolean)
+
+      // ── 定向升级（2026-08-08）：只给"有人给了硬反证但票数不够判杀"的 claim 加派 ──
+      // 病因：`vs.length >= 2 && hard > vs.length/2` 配默认 VOTES=1 ⟹ 互不相同的 claim
+      // REFUTED 数学上不可达、kill 率精确 0%，而实测 90% 的历史 run 就跑在这个默认档；
+      // 更糟的是它静默 —— killedCount=0 长得像"本轮没有假 claim"，实际是枪被规则关掉了。
+      // 定向而非全局提档：无人反对的 claim 不加钱（全局 VOTES=3 约 80% 开销花在那上面）。
+      const needEscalate = checkable.filter(c => {
+        const { vs, hard } = tallyVotes(verdicts, c.claim)
+        return vs.length > 0 && vs.length < ESCALATE_QUORUM && hard > 0
+      })
+      if (needEscalate.length) {
+        escalatedClaims += needEscalate.length
+        log(`⚖️ 定向升级：${res.exp.agentType}#r${round} 有 ${needEscalate.length} 条 claim 收到硬反证但票数不足，追派至 ${ESCALATE_QUORUM} 票复核`)
+        const extra = (await parallel(
+          needEscalate.flatMap(c => {
+            const have = tallyVotes(verdicts, c.claim).vs.length
+            escalationVotes += ESCALATE_QUORUM - have
+            // lensIdx 从 1 起：第一票（VOTES=1 时）无 lens，追派的两票走另外两个视角
+            return Array.from({ length: ESCALATE_QUORUM - have }, (_, k) => () => spawnVerify(c, res, round, k + 1))
+          })
+        )).filter(Boolean)
+        verdicts.push(...extra)
+      }
+      return { ...res, verdicts }
     }
   )
 }
@@ -417,51 +572,23 @@ if (!clean.length) {
   throw new Error(`expert-panel: ${SEED_EXPERTS.length} 个专家全部无有效产出（agent 失败或被跳过），拒绝在空数据上合成决策。检查 experts 里的 agentType 是否为合法注册名（非法名会被静默吞成 null），或看 journal.jsonl 里各 agent 的真实返回值。`)
 }
 
-// 反证的可核验锚点：file:line / URL / 命令输出 / 具体数字。
-// 实测 617 条 REFUTED 中 90.1% 自称 HARD，而旧代码从不校验 —— 约 17% 已验证 claim 被
-// 单个未经审计的裁判杀掉。可机器判定的规则不留在散文层（散文层已被实证无效）。
-// 2026-08-08 收紧（第一版写太松，实测把纯推理判成硬证据 —— 等于给空口反证发了杀权）：
-//   「参考 12 次运行的印象」    命中旧的 \d{2,}\s*次
-//   「roughly 25% of cases, from memory」 命中旧的 %
-//   「an ls of the repo shows nothing」   命中旧的 \bls\b
-// 裸数字和裸命令词在自然语言里几乎必然误命中，已删。命令词改为必须跟参数
-// （"grep -n foo" 算证据，"我没有 grep 过" 不算）。
-// 失败方向刻意偏保守：宁可把真证据判成 WEAK（只是不杀、降 CONTESTED），也不放行空口 HARD。
-const EVIDENCE_MARK = /([\w./-]+\.[A-Za-z]{1,5}:\d+|https?:\/\/|```|\b(grep|rg|sed|awk|git|node|python3?)\s+[-\w'"/.]|\$\s+\w)/i
-const effectiveStrength = v =>
-  v.verdict !== 'REFUTED' ? 'NA'
-    : (v.refutationStrength === 'HARD' && EVIDENCE_MARK.test(String(v.reason || ''))) ? 'HARD'
-      : 'WEAK'
-
-// 聚合：标出每条被验证 claim 的多数裁决。
-// 2026-08-08 修：旧判据 `hardRefuted > vs.length/2` 在两端都错 —— VOTES 默认 1 时 1>0.5，
-// **单个 skeptic 即可杀 claim**，注释里"只有 HARD 且过多数才真杀"在默认路径上根本不成立；
-// 而 VOTES=2 时需 2>1 即全票，花双倍 token 反而更难杀假 claim（2 严格劣于 1）。
-// 新判据：至少 2 个独立 skeptic 且 HARD 过半才真杀 —— 单票 HARD 最多降 CONTESTED（存疑保留）。
-function majorityVerdict(verdicts, claim) {
-  const vs = verdicts.filter(v => v.claim === claim)
-  if (!vs.length) return 'NOTCHECKED'
-  const hard = vs.filter(v => effectiveStrength(v) === 'HARD').length
-  const anyRefuted = vs.filter(v => v.verdict === 'REFUTED').length
-  if (vs.length >= 2 && hard > vs.length / 2) return 'REFUTED'   // 多数 HARD 反证（且非单票）→ 真杀
-  if (anyRefuted > 0) return 'CONTESTED'                          // 有反对但未过门槛 → 存疑保留，不静默杀
-  // 全员判"查不实" ≠ 已确证：出口侧必须能区分「已确证为真」与「没查出反证」。
-  // 旧实现没有这个分支，两者同码返回 KEPT，Verify 阶段在最后一公里失去分辨率
-  // （实测 3218 条 verdict 里 UNVERIFIABLE 只用了 1 次 = 0.03%）。
-  if (vs.every(v => v.verdict === 'UNVERIFIABLE')) return 'UNVERIFIABLE'
-  return 'KEPT'
-}
-
 const digest = clean.map(r => {
   const vAll = r.verdicts || []
-  const claims = ((r.out && r.out.claims) || []).map(c => ({
-    claim: c.claim, confidence: c.confidence, evidence: c.evidence, verifyMethod: c.verifyMethod,
-    status: majorityVerdict(vAll, c.claim),
+  const claims = ((r.out && r.out.claims) || []).map(c => {
+    const status = majorityVerdict(vAll, c.claim)
     // 把 skeptic 的反证理由一并交给 synthesize。旧实现要求它引用**从未收到**的 reason，
     // 指令无法从所给数据满足时模型只能编 —— 这是文件里最直接的幻觉诱因。
-    refutations: vAll.filter(v => v.claim === c.claim && v.verdict === 'REFUTED')
-      .map(v => `[${effectiveStrength(v)}] ${v.reason}`),
-  }))
+    const refuted = vAll.filter(v => v.claim === c.claim && v.verdict === 'REFUTED')
+    const rendered = refuted.map(v => `[${effectiveStrength(v)}] ${v.reason}`)
+    return {
+      claim: c.claim, confidence: c.confidence, evidence: c.evidence, verifyMethod: c.verifyMethod,
+      status,
+      // status=KEPT 却有反对票 = 孤票 WEAK（空口怀疑，未过 contest 门槛）。
+      // 反证不丢，但降级为附注：不改 claim 的既定性，只允许当 tensions 的脚注。
+      refutations: status === 'KEPT' ? [] : rendered,
+      weakNotes: status === 'KEPT' ? rendered : [],
+    }
+  })
   return {
     expert: r.exp.agentType,
     round: r.round,
@@ -472,8 +599,9 @@ const digest = clean.map(r => {
   }
 })
 
-// killed 由代码确定性算出并作为**封闭清单**下发，不让 synthesize 自由发挥
-const KILLED_LIST = digest.flatMap(d => d.claims.filter(c => c.status === 'REFUTED').map(c => c.claim))
+// killed 由代码确定性算出并作为**封闭清单**下发，不让 synthesize 自由发挥。
+// 去重（2026-08-08）：同一条 claim 文本若在多处出现会被重复计入，让 killedCount 虚高。
+const KILLED_LIST = [...new Set(digest.flatMap(d => d.claims.filter(c => c.status === 'REFUTED').map(c => c.claim)))]
 
 const synthesis = await agent(
   `把下面多个专家（可能跨多轮深挖）的独立意见 + 对抗验证结果合成为一个决策视图。
@@ -483,12 +611,15 @@ ${Q}
 
 ## 各专家产出
 每条 claim 附 status：
-- KEPT = 经验证站住
-- CONTESTED = 有反对但反证不够硬/未过多数门槛，存疑保留、不得当既定事实
+- KEPT = 经验证站住（可能带 weakNotes，见下）
+- CONTESTED = 收到硬反证但未过多数门槛，或收到 ≥2 张软反对 —— 存疑保留、不得当既定事实
 - UNVERIFIABLE = 验证者查不实也证不伪（≠ 已确证），只能当待验证假设
 - REFUTED = 已被多数硬反证驳倒
 - NOTCHECKED = 未达验证门槛，没验
-refutations 字段是 skeptic 给出的反证原文（供你写 tensions 时引用，别自己编）。round = 第几轮深挖产出。
+refutations 字段是 skeptic 给出的反证原文（供你写 tensions 时引用，别自己编）。
+weakNotes 字段是**孤立的一张软反对票**（空口怀疑，无可核验锚点，未过存疑门槛）：它不改变该 claim 的既定性，
+你可以在相关 tensions 里把它当脚注提一句，但**不得**据此把一条 KEPT claim 降格、也不得因此拒绝把它写进 decision。
+round = 第几轮深挖产出。
 
 ${JSON.stringify(digest, null, 2)}
 
@@ -503,7 +634,9 @@ ${JSON.stringify(KILLED_LIST, null, 2)}
 3. 真实分歧必须放进 tensions 保留 —— 严禁为了"给个干净答案"把对立观点压平成虚假共识。
 4. 禁止附和提问者的既有立场。若 KEPT 证据整体指向提问者不想听的结论，明确说出来。
 5. agreements 只放"多个专家各自独立得出"的点，不是一个专家说、其他没反对。
-${VOTES === 1 ? '6. 本次 verifyVotes=1：每条驳倒判决只有一个未经审计的裁判（且单票不足以判 REFUTED，最多降 CONTESTED），请在 decision 里对这一点给出显式折扣提示。' : ''}${EVAL ? '\n7. decision 给 Floor / Base / Optimal 三档。' : ''}${CONFIDENTIAL_NOTE}`,
+${VOTES === 1 ? `6. 本次 verifyVotes=1（基础档）：${escalatedClaims > 0
+      ? `其中 ${escalatedClaims} 条 claim 因收到硬反证已被自动追派到 ${ESCALATE_QUORUM} 票复核（判 REFUTED 的都经过多数确认）；**其余** claim 仍只有一个未经审计的裁判做过检查。请在 decision 里区分这两类的可信度，不要一刀切打折。`
+      : `本轮没有任何 claim 收到硬反证，因此全部判决都出自单个未经审计的裁判。请在 decision 里对这一点给出显式折扣提示。`}` : ''}${EVAL ? '\n7. decision 给 Floor / Base / Optimal 三档。' : ''}${CONFIDENTIAL_NOTE}`,
   { label: 'synthesize', phase: 'Synthesize', schema: SYNTH_SCHEMA }
 )
 
@@ -513,14 +646,32 @@ ${VOTES === 1 ? '6. 本次 verifyVotes=1：每条驳倒判决只有一个未经�
 // 这个说法的前提本就不成立，产出一直在磁盘上）。
 const _vstat = { HOLDS: 0, REFUTED: 0, UNVERIFIABLE: 0 }
 const _cstat = { HIGH: 0, MEDIUM: 0, LOW: 0, UNVERIFIED: 0 }
-let _softened = 0 // 自称 HARD 但无可核验锚点、被 JS 降为 WEAK 的条数
+let _softened = 0    // 自称 HARD 但两条通道都无锚点、被 JS 降为 WEAK 的条数
+let _structured = 0  // 自称 HARD 且带合格 evidenceRefs 的条数（主通道遵守率）
+let _fallbackOnly = 0 // 自称 HARD、evidenceRefs 不合格但散文正则救回的条数（fallback 依赖度）
 for (const r of clean) {
   for (const v of (r.verdicts || [])) {
     if (v && v.verdict in _vstat) _vstat[v.verdict]++
-    if (v && v.verdict === 'REFUTED' && v.refutationStrength === 'HARD' && effectiveStrength(v) === 'WEAK') _softened++
+    if (v && v.verdict === 'REFUTED' && v.refutationStrength === 'HARD') {
+      const refs = Array.isArray(v.evidenceRefs) ? v.evidenceRefs : []
+      if (refs.some(isUsableRef)) _structured++
+      else if (effectiveStrength(v) === 'HARD') _fallbackOnly++
+      else _softened++
+    }
   }
   for (const c of ((r.out && r.out.claims) || [])) if (c && c.confidence in _cstat) _cstat[c.confidence]++
 }
+
+// status 五档分布（2026-08-08 加）。此前 runRecord 只记 verdict 级统计，而"claim 最终落到哪一档"
+// 才是出口质量 —— 想知道它得去解析 transcript 里的 digest JSON，属可做但费劲的 ergonomics 缺口。
+const _sstat = { KEPT: 0, CONTESTED: 0, UNVERIFIABLE: 0, REFUTED: 0, NOTCHECKED: 0 }
+for (const d of digest) for (const c of d.claims) if (c.status in _sstat) _sstat[c.status]++
+const _verified = _sstat.KEPT + _sstat.CONTESTED + _sstat.UNVERIFIABLE + _sstat.REFUTED
+// 退化告警：受检 claim 里过半沉淀成"存疑/查不实"时，输出正在滑向"什么都存疑"的无信息态。
+// 阈值 0.45 取自历史基线（逐 run REFUTED 率中位 0.12、p90 0.34，74 个 run 无一 ≥0.50）。
+const _contestedRatio = _verified ? (_sstat.CONTESTED + _sstat.UNVERIFIABLE) / _verified : 0
+const _degraded = _contestedRatio > 0.45
+if (_degraded) log(`⚠️ degraded：受检 claim 中 ${(_contestedRatio * 100).toFixed(0)}% 落 CONTESTED/UNVERIFIABLE（基线 p90≈34%），本次结论的信息量偏低，读 decision 时按此打折。`)
 const runRecord = {
   question: Q,
   castMode,                    // explicit | generic-optin
@@ -535,13 +686,26 @@ const runRecord = {
   stopReason,
   verdictStats: _vstat,        // HOLDS/REFUTED/UNVERIFIABLE 计数 —— 长期 refute 率监控
   confidenceStats: _cstat,     // 专家 claim 的置信度分布 —— 监控 HIGH 通胀
-  softenedHardRefutations: _softened, // 证据门拦下的"自称硬反证"条数
+  statusStats: _sstat,         // claim 最终五档分布 —— 出口质量，比 verdictStats 更接近"用户读到什么"
+  contestedRatio: Number(_contestedRatio.toFixed(3)), // (CONTESTED+UNVERIFIABLE)/受检数
+  degraded: _degraded,         // >0.45 → 本次输出滑向"什么都存疑"，结论信息量偏低
+  softenedHardRefutations: _softened,   // 两条通道都无锚点、被降 WEAK 的条数
+  structuredHardRefutations: _structured, // 走 evidenceRefs 主通道的条数
+  fallbackOnlyHardRefutations: _fallbackOnly, // 仅靠散文正则救回的条数 —— 主通道遵守率的补数
+  escalatedClaims,             // 因收到硬反证而被追派复核的 claim 数
+  escalationVotes,             // 追派出去的额外 skeptic 票数（成本核算）
   killedCount: KILLED_LIST.length,    // 确定性计算，不取 synthesize 的自述
+  // synthesize 自述的 killed 条数。它被 :495 的封闭清单散文约束要求"逐字照抄"，
+  // 而本文件自己的结论是散文约束不可靠 —— 记下偏离量，让"到底遵不遵守"变成可测而非可信。
+  killedSelfReported: ((synthesis && synthesis.killed) || []).length,
   tensionsCount: ((synthesis && synthesis.tensions) || []).length,
   agreementsCount: ((synthesis && synthesis.agreements) || []).length,
   tokensSpent: budget ? budget.spent() : null,
 }
-log(`runRecord: castMode=${castMode}｜rounds=${round}｜verdict=${JSON.stringify(_vstat)}｜confidence=${JSON.stringify(_cstat)}｜softened=${_softened}｜killed=${runRecord.killedCount}｜stop=${stopReason}`)
+log(`runRecord: castMode=${castMode}｜rounds=${round}｜verdict=${JSON.stringify(_vstat)}｜status=${JSON.stringify(_sstat)}｜confidence=${JSON.stringify(_cstat)}｜softened=${_softened}(struct=${_structured}/fallback=${_fallbackOnly})｜escalated=${escalatedClaims}(+${escalationVotes}票)｜killed=${runRecord.killedCount}｜contested=${(_contestedRatio * 100).toFixed(0)}%${_degraded ? ' ⚠️degraded' : ''}｜stop=${stopReason}`)
+if (runRecord.killedSelfReported !== runRecord.killedCount) {
+  log(`ℹ️ synthesize 自述 killed ${runRecord.killedSelfReported} 条 ≠ 封闭清单 ${runRecord.killedCount} 条 —— 已由 JS 覆盖为封闭清单（散文约束再次被实证不可靠）`)
+}
 
 return {
   question: Q,
@@ -550,6 +714,10 @@ return {
   tokensSpent: budget ? budget.spent() : null,
   castMode,        // explicit | generic-optin —— 调用侧可据此确认按题选人是否生效
   runRecord,       // 本次 run 的紧凑元数据，供调用侧当场查看，不持久化
-  synthesis,
+  // killed 用 JS 的封闭清单覆盖 synthesize 的自述（2026-08-08）。
+  // 此前 KILLED_LIST 只出现在 :476 计算 / :496 塞进 prompt / runRecord 取 .length —— 返回对象里
+  // **没有它**，输出的 killed 是 synthesis agent 自由生成的，只受两条散文约束，而 SYNTH_SCHEMA
+  // 对它仅约束 array of string，返回 [] 也能过校验。这正是本文件 :422 判定为无效的那一层。
+  synthesis: synthesis ? { ...synthesis, killed: KILLED_LIST } : synthesis,
   perExpert: digest,
 }
