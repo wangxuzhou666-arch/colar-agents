@@ -147,6 +147,7 @@ These are stable pointers. The frameworks themselves evolve — read the linked 
 - **社交向 idea 强制基线检查** — 三巨头对比（小红书/抖音/微信）+ 深/广二选一：see `feedback_social_app_baseline_check.md`
 - **任务分流** 五种 agent 协作模式：see `feedback_task_mode_split.md`
 - **AI 时代护城河判断**：see `feedback_ai_era_moat.md`
+- **spike / playground 成果要进产品并上线**（"把调参台的东西搬进产品" · "搬渲染核心" · "上传到线上版本"）：走 skill `spike-to-production`（含 `workflow.js` 两 phase 编排，**人工审核 gate 卡在 survey 与 port 之间**——画质这类判断机器给不出结论，所以 `phase:"port"` 不传 `plan` 直接抛错）。核心前提：**亲验通过 ≠ 已上线**，"移植"这段没有流程就会静默地一直不发生，而所有人都以为它早做完了。
 - **当前项目 / 优先级 / 职业方向**：see `user_profile.md` + `project_*.md`
 
 **Why pointer-only**：framework 会演进（如战略评估问题集多次升级），项目状态会变，把这些写进 SOUL 必然导致 drift。SOUL 只承担"这个 framework 存在 + 完整版在哪"的稳定声明。
