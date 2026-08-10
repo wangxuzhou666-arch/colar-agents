@@ -38,26 +38,33 @@ project: fabric-agent-demo (织锦) — /Users/colar/Desktop/创业/fabric-agent
 **Colar 提供 CLO-SET 导出文件**（本 skill 不写网站操作步骤 —— 2026-08-10 拍板，那段由 Colar 给文件）。
 到手可能是两种形态，处理路径不同：
 
+> **交付姿态（2026-08-10 Colar 拍板）**：Colar 只出素材和眼睛。解包 / 体检 / 打包 / 接线全部由 AI 在终端完成，
+> 浏览器打开时必须**已经是载入好的 3D 画面**（`?block=` 自动载入）。拖拽框 / 选文件是兜底 UI，
+> 正常流程里 Colar 永远不该看到它。
+
 | 形态 | 特征 | 处理 |
 |---|---|---|
-| 单文件 | 一个 `.glb` | 直接 `GLTFLoader().parse(ArrayBuffer)` |
-| **散包** | `.gltf` + `.bin` + 若干贴图 png | 必须先把文件名映射成 blob URL 再交给 loader |
+| 单文件 | 一个 `.glb` | 直接入库（体检后 cp 进 blocks/） |
+| **散包** | `.gltf` + `.bin` + 若干贴图 png | `npx -y @gltf-transform/cli copy in.gltf out.glb` 打包成单文件再入库（未引用的 displacement 会自动丢弃） |
 
-散包是 CLO-SET / Marvelous Designer 的**常见默认导出**。只拖主 `.gltf` 的话，loader 去解析外部引用一律 404（`file://` 下连相对路径都没有基准）。
+散包是 CLO-SET / Marvelous Designer 的**常见默认导出**。不打包直接给浏览器的话，loader 解析外部引用一律 404
+——所以散包在终端就地打包，不走浏览器拖多文件那条兜底路。
 
-### A2. 体检（接线前必做）
+### A2. 体检（接线前必做，AI 静态解析，不需要浏览器）
 
-拖进 `glb-check.html`（spike 里的体检台），它当场回答三件事：
+python 直接解析 `.gltf` JSON + `.bin`（散包）或 GLB chunk，当场回答三件事：
 
-1. **有没有 UV** —— 没有 = 换料不可能，这件废掉
-2. **UV 是按裁片展开还是算法生成的 atlas** —— atlas 贴平铺面料必拉伸
-3. **有几个材质槽** —— 只有 1 个 = 衣身 / 领子 / 袖子无法分开换
+1. **有没有 UV** —— 每个 primitive 查 `attributes.TEXCOORD_0`；没有 = 换料不可能，这件废掉
+2. **UV 是按裁片展开还是算法生成的 atlas** —— 逐裁片算 **3D 边长 / UV 边长** 的中位数：
+   各裁片一致（±10% 级）= 真裁片展开，平铺面料不拉伸；相差数倍 = 算法 atlas，必拉伸
+3. **有几个材质槽** —— `materials[]` 数量 + 每材质的 prim/三角数分布；只有 1 个 = 衣身 / 领子 / 袖子无法分开换
 
-任一项不过就别往下走，回去要新的导出。
+任一项不过就别往下走，回去要新的导出。`glb-check.html`（spike 体检台）只作肉眼兜底，不是正步骤。
 
-### A3. 归位
+### A3. 归位 + 验收
 
-放 `blocks/<slug>.glb`。CLO 导出的 16MB 级别很正常。
+放 `blocks/<slug>.glb`。CLO 导出的 16MB 级别很正常；4K 贴图散包打包后 50MB 级别，本地预览没问题，上线前再压。
+验收入口一律 `playground-3layer.html?block=blocks/<slug>.glb` 自动载入后 `verify_and_open.sh` 弹给 Colar——**不要让他手动拖**。
 
 ### A4. 材质槽映射（最容易踩的一条）
 
@@ -68,17 +75,26 @@ CLO 导出的布片**全部叫 `Cloth_mesh`**（几十个同名），按面料�
 槽位分三类，用材质名正则猜：
 
 ```js
+// 逐件显式槽位表：正则救不了的乱码材质名优先查这里（精确匹配 > 正则猜测）。
+// 实例（ethnic-print-dress01）：明线材质叫 "0.1_2998"、按扣叫 "snap_2954"——
+// 前者任何正则都落空，落进 main 会给 176k tris 的明线贴平铺面料，比不换更糟。
+const SLOT_OVERRIDES = { "0.1_2998": "keep", "output_2975": "keep" };
+
 function guessSlot(matName) {
+  if (matName in SLOT_OVERRIDES) return SLOT_OVERRIDES[matName];
   const n = (matName || "").toLowerCase();
   // 人台/替身：直接隐藏
   if (/ghost|mannequin|avatar|dummy|skin/.test(n)) return "off";
   // 配件保留原始材质：它们的 UV 是 atlas 里的一小块（实测纽扣/明线只占 5%），
   // 换上平铺面料只会显示被拉伸的一角，比不换更糟
-  if (/button|topstitch|stitch|zip|trim|leather|ribbon|bow|tulle|lace|label|eyelet/.test(n))
+  if (/button|topstitch|stitch|zip|snap|trim|leather|suede|ribbon|bow|tulle|lace|label|eyelet/.test(n))
     return "keep";
   return "main";   // 剩下的才是可换料的衣身
 }
 ```
+
+新 block 入库时逐材质核对槽位判定：正则漏掉的（乱码名 / 身份不明层）登记进 `SLOT_OVERRIDES`，
+身份不明的层默认 keep，等 Colar 在槽位表里切「隐藏」肉眼定夺后再改。
 
 同时把原材质留底 `o.userData.origMat = o.material` —— 切回「原样」槽位要还原成 CLO 自带的 PBR 外观。
 
@@ -238,6 +254,7 @@ curl -s -o /dev/null -w "%{http_code}\n" "http://localhost:8765/textures/<Asset>
 | `scene.remove` 当成释放 | 连拖三四件后显存满、页面卡死 | `disposeModel()`，且带上 `userData.origMat` |
 | dispose 时误伤共享材质 | 换件后模型全黑 | 跳过 mainMat / altMat |
 | `file://` 直接打开 html | fetch 本地 GLB / 贴图被 CORS 挡 | 起 `python3 -m http.server` 走 localhost |
+| three.js 走 CDN importmap | CDN 一抖 module 死在第一行 import，页面只剩原始拖拽框、`?block=` 自动载入失效、零报错 | three 本体 + addons vendor 进本地目录（注意 r180 `RGBELoader.js` 只是转发壳，真身 `HDRLoader.js` 要一起带）；再加 window `error`/`unhandledrejection` 兜底把报错写上屏 |
 | `node -p "require('three/package.json')"` 查版本 | 被 three 的 exports 字段挡住 | 用 python 直接读文件，或看 importmap 里的 CDN 版本号 |
 
 ---
