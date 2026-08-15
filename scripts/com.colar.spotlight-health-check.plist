@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Spotlight 索引死锁每日体检 —— 见 scripts/spotlight_health_check.sh 的注释头。
+
+  为什么跑的是 ~/.local/bin/ 的副本而不是 repo 里的源：
+    ~/Desktop 受 TCC 保护，launchd 拉起的 /bin/bash 读不到它 —— 实测 exit 126
+    "Operation not permitted"（交互 Terminal 有桌面权限所以手动跑得通，会掩盖这个问题）。
+    不给 /bin/bash 开完全磁盘访问（等于把全盘权限送给每个 shell 脚本），
+    所以改成部署一份副本到不受保护的 ~/.local/bin/。
+    同理本 plist 在 ~/Library/LaunchAgents/ 下也是**真实副本而非 symlink**。
+
+  重要：改完 repo 里的源之后，必须重跑下面的同步命令，否则改动不会生效。
+
+  安装 / 更新：
+    cp ~/Desktop/colar-agents/scripts/spotlight_health_check.sh ~/.local/bin/
+    cp ~/Desktop/colar-agents/scripts/com.colar.spotlight-health-check.plist ~/Library/LaunchAgents/
+    launchctl bootout gui/$UID/com.colar.spotlight-health-check 2>/dev/null
+    launchctl bootstrap gui/$UID ~/Library/LaunchAgents/com.colar.spotlight-health-check.plist
+
+  卸载：  launchctl bootout gui/$UID/com.colar.spotlight-health-check
+  手动跑：launchctl kickstart -kw gui/$UID/com.colar.spotlight-health-check
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.colar.spotlight-health-check</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/colar/.local/bin/spotlight_health_check.sh</string>
+        <string>--notify</string>
+    </array>
+
+    <!-- 每天 13:00 跑一次。索引死锁是「烧几天才明显」的慢性问题，不需要高频轮询；
+         选午间是因为机器多半开着且已过早上的登录风暴。
+         机器在 13:00 处于睡眠时 launchd 会在唤醒后补跑一次（StartCalendarInterval 语义）。 -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>13</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <!-- 不在登录时跑：登录瞬间 Spotlight 本来就忙，且脚本要占 20 秒采样，没必要挤在开机路径上 -->
+    <key>RunAtLoad</key>
+    <false/>
+
+    <!-- 后台优先级，别跟前台工作抢资源 -->
+    <key>ProcessType</key>
+    <string>Background</string>
+    <key>LowPriorityIO</key>
+    <true/>
+    <key>Nice</key>
+    <integer>10</integer>
+
+    <key>StandardOutPath</key>
+    <string>/Users/colar/Library/Logs/spotlight_health_check.launchd.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/colar/Library/Logs/spotlight_health_check.launchd.log</string>
+</dict>
+</plist>
