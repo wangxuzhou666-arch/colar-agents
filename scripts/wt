@@ -1,0 +1,230 @@
+#!/usr/bin/env bash
+# wt —— git worktree 的纪律化包装。把六类历史踩坑做成机械层硬防，而不是纪律文本。
+#
+# Usage:
+#   wt new <用途> [ref]        建 worktree 到 ~/.wt/<repo>-<用途>（ref 默认 HEAD，detached）
+#        --branch <name>       建新分支而不是 detach
+#        --no-env              不继承 .venv / node_modules
+#        --copy-venv           拷贝 .venv 而不是 symlink（需要就地改依赖时用）
+#   wt ls                      列出本仓所有 worktree，标注 脏 / 悬空 / 不在 ~/.wt
+#   wt rm <用途|路径>          拆掉；有未提交改动会**拒绝**并列出来，要显式 --force
+#   wt run <用途> <cmd...>     在 worktree 内跑命令（子 shell，调用方 cwd 绝不进去）
+#   wt path <用途>             打印规范化后的绝对路径
+#   wt main                    打印**主工作树**根（在 worktree 里调用也返回主仓）
+#   wt gc                      prune 失联记录 + 删 ~/.wt 下的孤儿目录（干净的才删）
+#
+# Exit: 0 成功；1 用法/前置错误；2 拒绝执行（脏树、目录已存在且非本仓 worktree）
+#
+# 背景（2026-08-18 全量扫 5297 session、288 次 git worktree 调用得出的六类坑）：
+#  1. cwd 悬空：cd 进 worktree 后把它删了，shell 卡在不存在的目录，后续命令全 ENOENT（6 次）。
+#     → 本脚本不提供 cd，只提供 `wt run`；调用方 cwd 永远留在主仓。
+#  2. /tmp ↔ /private/tmp 别名：git 存 realpath，用 /tmp/x 去 remove 对不上，只好 rm -rf + prune。
+#     → 所有路径过 `pwd -P` 规范化，落点固定 ~/.wt（无别名、非系统清理目标）。
+#  3. 防御式仪式：`rm -rf … && prune && add` 出现 33 次，`worktree list` 113 次（状态不可预测）。
+#     → new 内建幂等前置清理；ls 一屏给全状态。
+#  4. 产物随 worktree 蒸发：部署史写进 worktree 的 REPO_ROOT，worktree 一删记录永久丢失
+#     （2026-08-18 实证：当天三次部署丢了一条）。同形事故还有 mutation_check.py 随 scratchpad 消失。
+#     → `wt main` 给出正确的落盘锚点；`wt rm` 默认不 --force，脏树先摊开给人看。
+#  6. 环境不随 worktree 走：每次手工 cp .venv / 删 node_modules symlink / 用主仓绝对路径跑 pytest。
+#     → new 默认把 .venv、node_modules symlink 进去。
+#  （第 5 类「落点四处开花」由 ~/.wt 约定本身消除。）
+
+set -uo pipefail
+
+WT_HOME="${WT_HOME:-$HOME/.wt}"
+
+die()  { printf '%s\n' "$*" >&2; exit 1; }
+deny() { printf '%s\n' "$*" >&2; exit 2; }
+
+# 主工作树根：--git-common-dir 在主仓返回 .git、在 worktree 返回主仓的 .git，两种情形都能推回主仓。
+main_root() {
+    local cdir
+    cdir=$(git rev-parse --git-common-dir 2>/dev/null) || die "wt: 当前目录不在 git 仓库里（cwd=$PWD）"
+    ( cd "$(dirname "$(cd "$cdir" && pwd -P)")" && pwd -P )
+}
+
+repo_name() { basename "$(main_root)"; }
+
+# 脏检查：排除 wt 自己 symlink 进去的环境目录（.venv / node_modules），否则会永远误判为脏。
+wt_dirty() {
+    git -C "$1" status --porcelain 2>/dev/null \
+        | grep -vE '^\?\? (\.venv/?|node_modules/?|frontend/(node_modules/?)?)$'
+}
+
+# 规范化：不存在的路径也要能算出 realpath（拿父目录 -P 再拼 basename）
+canon() {
+    local p=$1 parent
+    if [ -d "$p" ]; then ( cd "$p" && pwd -P ); return; fi
+    parent=$( cd "$(dirname "$p")" 2>/dev/null && pwd -P )
+    if [ -n "$parent" ]; then printf '%s/%s\n' "$parent" "$(basename "$p")"
+    else printf '%s\n' "$p"   # 父目录还不存在：原样返回，规范化留给下次（绝不吐出 /basename）
+    fi
+}
+
+# 用途名 → 路径；已经是路径（含 /）就直接规范化
+wt_path_of() {
+    case "$1" in
+        */*) canon "$1" ;;
+        *)   canon "$WT_HOME/$(repo_name)-$1" ;;
+    esac
+}
+
+cmd_path() { [ $# -ge 1 ] || die "用法: wt path <用途>"; wt_path_of "$1"; }
+cmd_main() { main_root; }
+
+cmd_new() {
+    local purpose="" ref="" branch="" no_env=0 copy_venv=0
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --branch)    branch="${2:?--branch 需要分支名}"; shift 2 ;;
+            --no-env)    no_env=1; shift ;;
+            --copy-venv) copy_venv=1; shift ;;
+            -*)          die "wt new: 未知参数 $1" ;;
+            *)           if [ -z "$purpose" ]; then purpose=$1; else ref=$1; fi; shift ;;
+        esac
+    done
+    [ -n "$purpose" ] || die "用法: wt new <用途> [ref] [--branch <name>] [--no-env|--copy-venv]"
+    case "$purpose" in */*) die "wt new: <用途> 是名字不是路径（会落到 $WT_HOME/<repo>-<用途>）" ;; esac
+
+    local root path
+    root=$(main_root) || exit 1
+    mkdir -p "$WT_HOME"          # 必须先建：否则 canon 算不出父目录 realpath（首次使用踩过）
+    path=$(wt_path_of "$purpose")
+    ref=${ref:-HEAD}
+
+    # 幂等前置清理：只清「本仓注册过的 worktree」或「空目录」。别人的东西一律拒绝，不盲 rm -rf。
+    if [ -e "$path" ]; then
+        if git -C "$root" worktree list --porcelain | grep -qxF "worktree $path"; then
+            echo "wt: 同名 worktree 已存在，先拆 → $path"
+            cmd_rm "$path" || deny "wt: 旧 worktree 拆不掉（有未提交改动？）先处理它再重建"
+        elif [ -z "$(ls -A "$path" 2>/dev/null)" ]; then
+            rmdir "$path"
+        else
+            deny "wt: ${path} 已存在且不是本仓 worktree，拒绝覆盖。人工确认后自行删除。"
+        fi
+    fi
+    git -C "$root" worktree prune
+
+    if [ -n "$branch" ]; then
+        git -C "$root" worktree add -q -b "$branch" "$path" "$ref" || die "wt: worktree add 失败"
+    else
+        git -C "$root" worktree add -q --detach "$path" "$ref" || die "wt: worktree add 失败"
+    fi
+
+    # 环境继承（第 6 类）：默认 symlink，够跑测试/构建且零拷贝成本。
+    if [ "$no_env" -eq 0 ]; then
+        if [ "$copy_venv" -eq 1 ] && [ -d "$root/.venv" ]; then
+            cp -a "$root/.venv" "$path/.venv" && echo "wt: .venv 已拷贝（可就地改依赖）"
+        elif [ -d "$root/.venv" ] && [ ! -e "$path/.venv" ]; then
+            ln -s "$root/.venv" "$path/.venv" && echo "wt: .venv → symlink"
+        fi
+        local nm
+        for nm in node_modules frontend/node_modules; do
+            if [ -d "$root/$nm" ] && [ ! -e "$path/$nm" ]; then
+                mkdir -p "$(dirname "$path/$nm")"
+                ln -s "$root/$nm" "$path/$nm" && echo "wt: $nm → symlink"
+            fi
+        done
+    fi
+
+    echo "wt: 就绪 $path  ($(git -C "$path" rev-parse --short HEAD))"
+    echo "wt: 在里面干活用  wt run $purpose <命令>   —— 不要 cd 进去（cwd 悬空是历史第一高频坑）"
+    echo "wt: 要留存的产物写主仓  $(main_root)  —— worktree 一拆，里面的东西全没"
+}
+
+cmd_run() {
+    [ $# -ge 2 ] || die "用法: wt run <用途> <命令...>"
+    local purpose=$1; shift
+    local path; path=$(wt_path_of "$purpose")
+    [ -d "$path" ] || die "wt: worktree 不存在 → ${path}（先 wt new ${purpose}）"
+    # 子 shell 执行：调用方 cwd 不动，worktree 删掉也不会把 shell 卡在空目录里。
+    ( cd "$path" && "$@" )
+}
+
+cmd_ls() {
+    local root wthome; root=$(main_root) || exit 1
+    wthome=$(canon "$WT_HOME")   # WT_HOME 自身可能带 /tmp 别名，比较前先规范化
+    local p
+    git -C "$root" worktree list --porcelain | awk '/^worktree /{print substr($0,10)}' | while read -r p; do
+        local tag="" head="" dirty=""
+        [ "$p" = "$root" ] && tag="[主仓]"
+        if [ ! -d "$p" ]; then
+            printf '  悬空  %s  %s\n' "$p" "(目录已没，wt gc 可清)"
+            continue
+        fi
+        head=$(git -C "$p" rev-parse --short HEAD 2>/dev/null)
+        dirty=$(wt_dirty "$p" | wc -l | tr -d ' ')
+        case "$p" in
+            "$root")     : ;;
+            "$wthome"/*) : ;;
+            *) [ -z "$tag" ] && tag="[不在 ~/.wt]" ;;
+        esac
+        if [ "$dirty" != "0" ]; then
+            printf '  脏    %s  %s %s  (%s 处未提交)\n' "$p" "$head" "$tag" "$dirty"
+        else
+            printf '  净    %s  %s %s\n' "$p" "$head" "$tag"
+        fi
+    done
+}
+
+cmd_rm() {
+    local force=0 target=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --force|-f) force=1; shift ;;
+            *)          target=$1; shift ;;
+        esac
+    done
+    [ -n "$target" ] || die "用法: wt rm <用途|路径> [--force]"
+    local root path; root=$(main_root) || exit 1
+    path=$(wt_path_of "$target")
+    [ "$path" != "$root" ] || deny "wt: 拒绝拆主工作树"
+
+    if [ -d "$path" ] && [ "$force" -eq 0 ]; then
+        local dirty; dirty=$(wt_dirty "$path")
+        if [ -n "$dirty" ]; then
+            echo "wt: 拒绝拆 —— ${path} 里有未提交内容，删了就永久没了：" >&2
+            printf '%s\n' "$dirty" | head -20 >&2
+            echo "wt: 想留就先搬进主仓 ${root}，确认要丢再 wt rm $target --force" >&2
+            exit 2
+        fi
+    fi
+    local rmargs=""
+    [ "$force" -eq 1 ] && rmargs="--force"
+    # shellcheck disable=SC2086
+    git -C "$root" worktree remove $rmargs "$path" 2>/dev/null \
+        || { rm -rf "$path"; git -C "$root" worktree prune; }
+    git -C "$root" worktree prune
+    echo "wt: 已拆 $path"
+    # cwd 逃逸提示：调用方 shell 若正好停在里面（不该发生，但兜一手）
+    case "$PWD" in "$path"|"$path"/*) echo "wt: 当前 shell 的 cwd 在已删目录里，请 cd $root" >&2 ;; esac
+}
+
+cmd_gc() {
+    local root; root=$(main_root) || exit 1
+    git -C "$root" worktree prune
+    echo "wt: prune 完成"
+    local d
+    for d in "$WT_HOME"/*; do
+        [ -d "$d" ] || continue
+        if ! git -C "$root" worktree list --porcelain | grep -qxF "worktree $(canon "$d")"; then
+            if [ -z "$(wt_dirty "$d")" ]; then
+                rm -rf "$d"; echo "wt: 清掉孤儿目录 $d"
+            else
+                echo "wt: 保留 $d（不是本仓 worktree 但里面有内容，人工确认）"
+            fi
+        fi
+    done
+}
+
+case "${1:-}" in
+    new)  shift; cmd_new  "$@" ;;
+    run)  shift; cmd_run  "$@" ;;
+    ls)   shift; cmd_ls   "$@" ;;
+    rm)   shift; cmd_rm   "$@" ;;
+    gc)   shift; cmd_gc   "$@" ;;
+    path) shift; cmd_path "$@" ;;
+    main) shift; cmd_main "$@" ;;
+    ""|-h|--help) sed -n '2,20p' "$0" ;;
+    *) die "wt: 未知子命令 '$1'（wt --help）" ;;
+esac
