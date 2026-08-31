@@ -390,8 +390,11 @@ Contributors who make significant contributions will be:
 
 - [README.md](README.md) - Overview and agent catalog
 - [Example: Frontend Developer](engineering/engineering-frontend-developer.md) - Well-structured agent example
-- [Example: Reddit Community Builder](marketing/marketing-reddit-community-builder.md) - Great personality example
-- [Example: Whimsy Injector](design/design-whimsy-injector.md) - Creative specialist example
+- [Example: Design Bridge](design/design-bridge.md) - Two-mode agent with a strong voice (frontmatter `vibe` / `emoji`, mode-aware workflow)
+
+> 2026-08-31: the two former personality examples (Reddit Community Builder, Whimsy Injector) were
+> deleted along with 157 other never-deployed agents. The library is now 7 agents — everything in it
+> is mounted and in daily use. Add a new one only when you intend to deploy it.
 
 ### For Agent Design
 

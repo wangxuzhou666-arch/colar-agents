@@ -64,13 +64,18 @@ The LLM will use MCP memory tools automatically when given these instructions:
 
 No code changes to the agent files. No API calls to write. The MCP tools handle everything.
 
-## Example: Enhancing the Backend Architect
+## Examples
 
-See [backend-architect-with-memory.md](backend-architect-with-memory.md) for a complete example — the standard Backend Architect agent with a Memory Integration section added.
+> Both worked examples that used to live here are gone. `backend-architect-with-memory.md` was
+> deleted on 2026-08-31 with the other 158 never-deployed agents; `../../examples/` had already
+> ceased to exist before that. The pattern they showed is one paragraph anyway, so it is written
+> out below instead of linked.
 
-## Example: Memory-Powered Workflow
-
-See [../../examples/workflow-with-memory.md](../../examples/workflow-with-memory.md) for the Startup MVP workflow enhanced with persistent memory, showing how agents pass context through memory instead of copy-paste.
+**The pattern**: take an agent's `.md` unchanged and append a *Memory Integration* section telling it
+when to `remember` (a decision made, a deliverable shipped, a context snapshot worth resuming from)
+and when to `recall` (before re-deriving anything that a past session already settled). No code
+changes, no API calls — the MCP tools do the work. Agents then pass context to each other through
+memory instead of copy-paste.
 
 ## Tips
 
