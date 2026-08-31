@@ -1,6 +1,6 @@
 ---
 name: wt-discipline
-description: 用 git worktree 做隔离验证/部署/并行分支时的纪律 —— 一律走 `wt` 包装脚本（scripts/wt），落点固定 ~/.wt/<repo>-<用途>，绝不 cd 进 worktree、绝不把要留存的产物写在 worktree 里。治六类实证踩坑：cwd 悬空后满屏 ENOENT · /tmp↔/private/tmp 别名让 remove 失配 · 防御式 rm -rf+prune 仪式 · 产物随 worktree 蒸发（部署史丢过一条）· 落点四处开花 · .venv/node_modules 每次手搭 · 三样不进 git 的产物逐个撞部署门（.venv 用 symlink 会让 rsync --delete 删掉服务器真实目录）· worktree 只上线 HEAD 造成「本地改了线上没变」。Use when: creating a throwaway worktree to verify a build/test at a specific ref, running a clean-tree deploy, working two branches in parallel, or debugging "worktree remove 删不掉 / 目录已存在 / No such file or directory / 部署记录不见了".
+description: "用 git worktree 做隔离验证/部署/并行分支时的纪律 —— 一律走 `wt` 包装脚本（scripts/wt），落点固定 ~/.wt/<repo>-<用途>，绝不 cd 进 worktree、绝不把要留存的产物写在 worktree 里。治六类实证踩坑：cwd 悬空后满屏 ENOENT · /tmp↔/private/tmp 别名让 remove 失配 · 防御式 rm -rf+prune 仪式 · 产物随 worktree 蒸发（部署史丢过一条）· 落点四处开花 · .venv/node_modules 每次手搭 · 三样不进 git 的产物逐个撞部署门（.venv 用 symlink 会让 rsync --delete 删掉服务器真实目录）· worktree 只上线 HEAD 造成「本地改了线上没变」。Use when: creating a throwaway worktree to verify a build/test at a specific ref, running a clean-tree deploy, working two branches in parallel, or debugging \"worktree remove 删不掉 / 目录已存在 / No such file or directory / 部署记录不见了\"."
 version: 1.1.0
 source: session-derived (2026-08-18)。全量扫 5297 个 session、200 个含真实 git worktree 操作的会话、288 次调用统计得出；六类失败模式均有现场证据。v1.1.0 (2026-08-19)：织锦一次干净部署实战补第四、五节——三样不进 git 的必补产物（素材/node_modules/.venv）、.venv 用 symlink 会触发 rsync --delete 删服务器真实目录、worktree 只上线 HEAD 导致「本地改了线上没变」。
 ---

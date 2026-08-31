@@ -1,6 +1,6 @@
 ---
 name: spike-to-production
-description: 把 spike / playground / 调参台里调通的成果搬进产品仓并上线的完整流程，带一道**人工审核 gate**（Colar 肉眼验 playground → 不通过就地打回，通过才进移植 loop）。治四类翻车：① 以为早就搬过了，其实产品里一行没落地 ② spike 与产品的库版本不同却假设像素等价 ③ 资产另起 lane 导致既不入 git 也不上服务器 ④ 拿 headless dump / build 绿当"亲验通过"。Use when: porting tuned render params, shaders, algorithms or pipeline logic from a spike/playground/scratch repo into the product repo and shipping it — or when the ask sounds like "把 playground/调参台的东西上传到线上", "搬渲染核心", "spike 成果进产品".
+description: "把 spike / playground / 调参台里调通的成果搬进产品仓并上线的完整流程，带一道**人工审核 gate**（Colar 肉眼验 playground → 不通过就地打回，通过才进移植 loop）。治四类翻车：① 以为早就搬过了，其实产品里一行没落地 ② spike 与产品的库版本不同却假设像素等价 ③ 资产另起 lane 导致既不入 git 也不上服务器 ④ 拿 headless dump / build 绿当\"亲验通过\"。Use when: porting tuned render params, shaders, algorithms or pipeline logic from a spike/playground/scratch repo into the product repo and shipping it — or when the ask sounds like \"把 playground/调参台的东西上传到线上\", \"搬渲染核心\", \"spike 成果进产品\"."
 version: 1.1.0
 source: session-derived (2026-08-10)；v1.1.0 (2026-08-17：补第四类资产「环境贴图/HDRI 降宽度」判据 + 机械门自身的可测性与 mutation 验证 + 烘焙管线的 HMR 陈旧模块反查 + 「拿历史产物当对照组」的归因错误 + 「指标量错会得出反结论」；并在 When to Use 划清边界——产品仓内 A/B 定参没有 spike 侧，workflow.js 缺 spikeDir 会抛错，该按需读局部而非跑编排)
 ---

@@ -1,6 +1,6 @@
 ---
 name: silent-page-debug
-description: 浏览器页面打开后只剩静态壳（JS 功能全无）、又零报错时的诊断阶梯。专治 <script type="module"> 的静默死：module 的 import 失败（依赖 404 / CDN 断 / importmap 被拒 / 依赖不闭包）只在 script 元素上发 error 事件——无 src、无 message，常规 window.onerror 抓不到，页面表现就是「原始兜底 UI 完好，什么都不发生」。诊断顺序：装三件诊断装备（报错上屏 + 启动脚印 + 标题信标）→ 自建日志服务器看请求序列（最硬证据）→ AppleScript 读标题信标（不靠用户截图）→ 干净 profile 对照分流 → vendor 依赖闭包检查。Use when: a static HTML page loads but its JS silently never runs — pristine fallback UI, zero errors, query-param auto-load does nothing — especially pages using ES modules, importmaps, or vendored libraries; or when debugging any "works in headless but not in the user's browser" split.
+description: "浏览器页面打开后只剩静态壳（JS 功能全无）、又零报错时的诊断阶梯。专治 <script type=\"module\"> 的静默死：module 的 import 失败（依赖 404 / CDN 断 / importmap 被拒 / 依赖不闭包）只在 script 元素上发 error 事件——无 src、无 message，常规 window.onerror 抓不到，页面表现就是「原始兜底 UI 完好，什么都不发生」。诊断顺序：装三件诊断装备（报错上屏 + 启动脚印 + 标题信标）→ 自建日志服务器看请求序列（最硬证据）→ AppleScript 读标题信标（不靠用户截图）→ 干净 profile 对照分流 → vendor 依赖闭包检查。Use when: a static HTML page loads but its JS silently never runs — pristine fallback UI, zero errors, query-param auto-load does nothing — especially pages using ES modules, importmaps, or vendored libraries; or when debugging any \"works in headless but not in the user's browser\" split."
 version: 1.0.0
 source: session-derived (2026-08-10)
 ---

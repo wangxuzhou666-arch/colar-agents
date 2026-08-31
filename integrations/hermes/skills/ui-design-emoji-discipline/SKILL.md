@@ -1,8 +1,8 @@
 ---
 name: ui-design-emoji-discipline
-description: 做 UI / 产品设计 / 文案 / CTA / 状态指示 / 按钮 / 错误提示时,默认禁用 emoji 和 pictographic 符号。SOUL "no emoji" 规则在视觉 affordance 场景最易被违反 — 本能上想加 ✨🚀📋 增加感知度,Colar 明确不要。Use when: writing React/Vue/Svelte JSX, CSS `::before content`, marketing copy, button labels, status badges, README, or any user-facing text.
+description: "做 UI / 产品设计 / 文案 / CTA / 状态指示 / 按钮 / 错误提示时,默认禁用 emoji 和 pictographic 符号。SOUL \"no emoji\" 规则在视觉 affordance 场景最易被违反 — 本能上想加 ✨🚀📋 增加感知度,Colar 明确不要。Use when: writing React/Vue/Svelte JSX, CSS `::before content`, marketing copy, button labels, status badges, README, or any user-facing text."
 version: 1.0.0
-source: feedback_emoji_in_ui_design (migrated 2026-05-24)
+source: feedback_emoji_in_ui_design (migrated 2026-05-24；**该 memory 文件 2026-08-30 复核时两个 lane 均已不存在**，内容已全部升格进本文件，此行仅存溯源)
 ---
 
 ## When to Use
@@ -57,6 +57,13 @@ grep -rn '[✨🚀🌐📋📎📄👁👀📍✓✗✕⚠⚡💡🔥🎯🆕�
 # verify zero pictographic emoji in user-facing code
 git diff --cached | grep -E '[\x{1F300}-\x{1FAFF}\x{2600}-\x{27BF}]' && echo "❌ FOUND EMOJI, fix before commit" || echo "✅ clean"
 ```
+
+> **2026-08-30 复核（90 天未动触发）**：上面这条命令**实测有效**，别照直觉判它坏。
+> macOS BSD `grep -E` 确实解析 `\x{...}` codepoint 范围（一度被怀疑是 PCRE-only 语法，已证伪）。
+> 判别力三分实测：纯中文「上线公告」(U+4E0A…) **放行** · 箭头 `→` (U+2192，在 2600-27BF 外) **放行** ·
+> 🚀 (U+1F680，在 1F300-1FAFF 内) **报警**。即它不会对中文项目全量假阳性——这是它能用的前提。
+> 本次复核同时确认：SOUL § Communication Style 的 "No emoji" 规则仍在（`soul/SOUL.md:41`），
+> 本 skill 全部规则依然成立，无需修订。
 
 ## Pitfalls
 

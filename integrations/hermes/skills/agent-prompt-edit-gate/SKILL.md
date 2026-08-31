@@ -1,6 +1,6 @@
 ---
 name: agent-prompt-edit-gate
-description: 改动 agent prompt body（master .md frontmatter 之后的正文）时强制跑 before/after eval 对比 pass rate，别盲改。已覆盖 agent（code-reviewer / senior-developer）走强制 gate；未覆盖 agent 属飞盲，先告知 Colar 要不要补 case。含四条铁律（退出码判 pass 别用管道 / 只跑 --agent 省 token / implementer 类无工具沙盒的 validity caveat / degradation-probe 用 majority-of-3）。Use when: editing the prompt body of any agent .md in colar-agents, or before/after running eval/run-eval.sh to judge whether a prompt change regressed an agent.
+description: "改动 agent prompt body（master .md frontmatter 之后的正文）时强制跑 before/after eval 对比 pass rate，别盲改。已覆盖 agent（code-reviewer / senior-developer）走强制 gate；未覆盖 agent 属飞盲，先告知 Colar 要不要补 case。含四条铁律（退出码判 pass 别用管道 / 只跑 --agent 省 token / implementer 类无工具沙盒的 validity caveat / degradation-probe 用 majority-of-3）。Use when: editing the prompt body of any agent .md in colar-agents, or before/after running eval/run-eval.sh to judge whether a prompt change regressed an agent."
 version: 1.0.0
 source: migrated from colar-agents/CLAUDE.md (2026-08-04 /doctor check 4 — 常驻正文迁 attach-on-demand)
 ---

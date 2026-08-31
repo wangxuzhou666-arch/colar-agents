@@ -97,7 +97,7 @@ argument-hint: "[一句话描述要 capture 的 procedure，可选 / --dry 只�
 
 ## Step 5 — SOUL pointer 建议（gated，绝不自动写 SOUL）
 
-判断本 skill 是否**全局相关**（跨项目通用、属 axiom 级触发，如 `max-mode-protocol` 已进 SOUL）：
+判断本 skill 是否**全局相关**（跨项目通用、属 axiom 级触发，如 `spike-to-production` 已进 SOUL）：
 
 - **是** → 产出**一条建议 pointer 行**让 Colar 决定，话术：
   > 此 skill 全局相关，建议往 SOUL（`colar-agents/soul/SOUL.md` § Strategic Frameworks）加 pointer：

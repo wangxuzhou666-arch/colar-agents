@@ -1,6 +1,6 @@
 ---
 name: style3d-resource-sync
-description: 从 Style3D Cloud（或任何官方导出不可用的 SaaS）把资源库数据同步进织锦平台的完整打法 —— 抓前端同款内部接口（Copy as cURL 取 Bearer）→ 列表+详情双拉合并 → 外部编码体系翻译 → 图片过平台守卫 → 灌 sqlite 带备份。治九类坑：端点名不可推导（猜 4 个变体全 404）· 详情 data.data 双层嵌套只剥一层会静默落空 · 列表与详情字段非包含关系（列表有图无价、详情有价无图）· 外部成分缩写与平台中文词表断链导致派生 tag 全 miss · imaging 守卫 max_side 有下界不能拧松 · CC0 判据方向易反 · stock_meters 映射会清零既有库存 · 图片降质到底该退尺寸档而非继续压 · 凭证 7 天过期让"全自动定时"成伪需求。Use when: pulling data out of a SaaS whose official export is unavailable or permission-locked (Style3D Cloud fabric/garment/order libraries in particular), and loading it into the fabric-agent-demo platform — or when debugging "字段拉下来了但全是空 / 派生 tag 一个没命中 / 导入后既有库存被清零".
+description: "从 Style3D Cloud（或任何官方导出不可用的 SaaS）把资源库数据同步进织锦平台的完整打法 —— 抓前端同款内部接口（Copy as cURL 取 Bearer）→ 列表+详情双拉合并 → 外部编码体系翻译 → 图片过平台守卫 → 灌 sqlite 带备份。治九类坑：端点名不可推导（猜 4 个变体全 404）· 详情 data.data 双层嵌套只剥一层会静默落空 · 列表与详情字段非包含关系（列表有图无价、详情有价无图）· 外部成分缩写与平台中文词表断链导致派生 tag 全 miss · imaging 守卫 max_side 有下界不能拧松 · CC0 判据方向易反 · stock_meters 映射会清零既有库存 · 图片降质到底该退尺寸档而非继续压 · 凭证 7 天过期让\"全自动定时\"成伪需求。Use when: pulling data out of a SaaS whose official export is unavailable or permission-locked (Style3D Cloud fabric/garment/order libraries in particular), and loading it into the fabric-agent-demo platform — or when debugging \"字段拉下来了但全是空 / 派生 tag 一个没命中 / 导入后既有库存被清零\"."
 version: 1.0.0
 source: session-derived (2026-08-21)
 ---

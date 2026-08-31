@@ -1,6 +1,6 @@
 ---
 name: nextjs-hmr-proactive-restart
-description: 在 Next.js 项目里跑 dev server 时,做 >3 文件批量编辑 / 改 middleware / 改 server component (page.jsx/layout.jsx/API route) / 加新依赖 / 加新路由 / 改 NEXT_PUBLIC_ env 后,主动 nuke .next + 重启 dev,不依赖 HMR。也用于排查 dev server 症状:页面卡「加载中」/ chunks 404 / 热更新(HMR)不生效 / 改完代码不刷新 / server 返回 200 但 client 白屏。Use when: working in a Next.js codebase running `npm run dev` and any of the above triggers fire, or when debugging stale HMR, 404 chunks, or a stuck "loading" page.
+description: "在 Next.js 项目里跑 dev server 时,做 >3 文件批量编辑 / 改 middleware / 改 server component (page.jsx/layout.jsx/API route) / 加新依赖 / 加新路由 / 改 NEXT_PUBLIC_ env 后,主动 nuke .next + 重启 dev,不依赖 HMR。也用于排查 dev server 症状:页面卡「加载中」/ chunks 404 / 热更新(HMR)不生效 / 改完代码不刷新 / server 返回 200 但 client 白屏。Use when: working in a Next.js codebase running `npm run dev` and any of the above triggers fire, or when debugging stale HMR, 404 chunks, or a stuck \"loading\" page."
 version: 1.0.0
 source: feedback_nextjs_hmr_restart_proactive (migrated 2026-05-24)
 ---

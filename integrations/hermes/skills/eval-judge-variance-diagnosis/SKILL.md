@@ -1,6 +1,6 @@
 ---
 name: eval-judge-variance-diagnosis
-description: 跑 LLM-judge / agent-output eval 时，若同一 case 的 verdict 跨重跑抖动（PASS↔FAIL 翻转或 score 大幅飘），先辨 variance 来源再修——别条件反射收紧 criteria。读多次 judge reasoning：描述同一输出却给不同分=judge 变异（收紧 criteria）；描述不同输出=agent 变异（修 agent prompt，criteria 没问题）。degradation-probe 单跑不可信，用 majority-of-3。Use when: an eval/LLM-judge verdict flaps across reruns, or before "fixing" a flaky eval case.
+description: "跑 LLM-judge / agent-output eval 时，若同一 case 的 verdict 跨重跑抖动（PASS↔FAIL 翻转或 score 大幅飘），先辨 variance 来源再修——别条件反射收紧 criteria。读多次 judge reasoning：描述同一输出却给不同分=judge 变异（收紧 criteria）；描述不同输出=agent 变异（修 agent prompt，criteria 没问题）。degradation-probe 单跑不可信，用 majority-of-3。Use when: an eval/LLM-judge verdict flaps across reruns, or before \"fixing\" a flaky eval case."
 version: 1.0.0
 source: session-derived (2026-06-30)
 ---

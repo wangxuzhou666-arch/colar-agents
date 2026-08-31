@@ -1,6 +1,6 @@
 ---
 name: ui-design-pipeline
-description: 所有界面设计任务必走的四段 pipeline —— Design Bridge（门卫，Replication 复刻 66 品牌 / Genesis 原创创世 二选一，产出 instructions-*.md）→ 设计执行（frontend-design plugin，主 loop 直接处理）→ Frontend Developer 实现 → /diff·build·/review。含触发词清单与「用户没指定品牌时给三条路、别把原创产品硬塞现成品牌」的判据。Use when: the task involves UI design, visual style, component libraries, CSS architecture, or interaction patterns — including "设计 / UI / 界面 / 样式 / 风格", new frontend pages, redesigns, or any brand named as a visual reference ("像 Linear 那样").
+description: "所有界面设计任务必走的四段 pipeline —— Design Bridge（门卫，Replication 复刻 66 品牌 / Genesis 原创创世 二选一，产出 instructions-*.md）→ 设计执行（frontend-design plugin，主 loop 直接处理）→ Frontend Developer 实现 → /diff·build·/review。含触发词清单与「用户没指定品牌时给三条路、别把原创产品硬塞现成品牌」的判据。Use when: the task involves UI design, visual style, component libraries, CSS architecture, or interaction patterns — including \"设计 / UI / 界面 / 样式 / 风格\", new frontend pages, redesigns, or any brand named as a visual reference (\"像 Linear 那样\")."
 version: 1.0.0
 source: migrated from colar-agents/CLAUDE.md (2026-08-04 /doctor check 4 — 常驻正文迁 attach-on-demand)
 ---
