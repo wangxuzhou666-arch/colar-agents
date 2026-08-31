@@ -1,6 +1,6 @@
 ---
 name: ui-design-pipeline
-description: "所有界面设计任务必走的四段 pipeline —— Design Bridge（门卫，Replication 复刻 66 品牌 / Genesis 原创创世 二选一，产出 instructions-*.md）→ 设计执行（frontend-design plugin，主 loop 直接处理）→ Frontend Developer 实现 → /diff·build·/review。含触发词清单与「用户没指定品牌时给三条路、别把原创产品硬塞现成品牌」的判据。Use when: the task involves UI design, visual style, component libraries, CSS architecture, or interaction patterns — including \"设计 / UI / 界面 / 样式 / 风格\", new frontend pages, redesigns, or any brand named as a visual reference (\"像 Linear 那样\")."
+description: "所有界面设计任务必走的四段 pipeline —— Design Bridge（门卫，Replication 复刻 74 品牌 / Genesis 原创创世 二选一，产出 instructions-*.md）→ 设计执行（frontend-design plugin，主 loop 直接处理）→ Frontend Developer 实现 → /diff·build·/review。含触发词清单与「用户没指定品牌时给三条路、别把原创产品硬塞现成品牌」的判据。Use when: the task involves UI design, visual style, component libraries, CSS architecture, or interaction patterns — including \"设计 / UI / 界面 / 样式 / 风格\", new frontend pages, redesigns, or any brand named as a visual reference (\"像 Linear 那样\")."
 version: 1.0.0
 source: migrated from colar-agents/CLAUDE.md (2026-08-04 /doctor check 4 — 常驻正文迁 attach-on-demand)
 ---
@@ -38,7 +38,7 @@ source: migrated from colar-agents/CLAUDE.md (2026-08-04 /doctor check 4 — 常
 
 - **不跳过**：即使是"简单改个按钮颜色"，也先检查有没有已存在的 design spec
 - **两种模式**：
-  - **Replication（复刻）** — 对标现成品牌，66 品牌可选（Claude, Linear, Vercel, Stripe, Notion, Figma, Apple, Spotify 等），忠实还原单一来源 → 输出 `instructions-{brand}.md`
+  - **Replication（复刻）** — 对标现成品牌，74 品牌可选（Claude, Linear, Vercel, Stripe, Notion, Figma, Apple, Spotify 等），忠实还原单一来源 → 输出 `instructions-{brand}.md`。⚠️ 品牌显示名 ≠ URL slug（Linear 的目录是 `linear.app`、Cal.com 是 `cal`），且要取 `DESIGN.md` 不是 `README.md`——后者已被上游掏空成一句迁移说明，取错**不报错**。权威清单与判活方法见 Design Bridge 本体
   - **Genesis（创世）** — 原创产品没有现成品牌可抄时，吃客户画像 + 调性 + 品类 + N 个灵感参考，**合成一套项目专属、自洽的原创 DESIGN.md** → 输出 `instructions-genesis-{project}.md`（保留 `instructions-` 前缀让 consumer 的 glob 仍命中，加 `genesis-` 区分原创 vs 复刻）。同样 9-section 格式，只是来源从"抄单一品牌"变成"从多灵感合成原创"
 - **用户没指定品牌时**：主动给三条路 —— ① 对标现成品牌（Replication）② 为原创产品创造品牌（Genesis，**原创项目推荐默认**）③ 自己定（generic fallback）。**不要把原创新产品硬塞进一个不相干的现成品牌**，那是旧 pipeline 的烂路。
 
