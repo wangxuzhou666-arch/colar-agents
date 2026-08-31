@@ -38,7 +38,6 @@ Attach-on-demand 的 procedural skill 索引。每个 skill 是"当 X 触发 →
 
 - [nextjs-hmr-proactive-restart](./nextjs-hmr-proactive-restart/SKILL.md) — Next.js dev server 跑着时，>3 文件批改 / 改 middleware / 改 server component / 加依赖 / 加路由 / 改 NEXT_PUBLIC_ env 后主动 nuke .next 重启，不依赖 HMR。Source: feedback_nextjs_hmr_restart_proactive
 - [ui-design-emoji-discipline](./ui-design-emoji-discipline/SKILL.md) — 做 UI / CTA / 文案 / 状态指示 / 按钮场景默认禁 emoji，含 self-grill 列表 + grep cleanup。Source: feedback_emoji_in_ui_design
-- ~~max-mode-protocol~~ — **已退役 2026-08-30**（目录已删）。内容 2026-08-05 已并回 memory `~/Desktop/colar-memory/feedback_max_mode_protocol.md`，那里是权威来源且更新（含 SKU→expert-panel 参数映射，旧 SKILL.md 没有）。SOUL § Strategic Frameworks 的 max mode 入口指向的也是该 memory 文件。**别重建同名 skill** —— 这条留着就是给查重 gate 看的。
 - [eval-judge-variance-diagnosis](./eval-judge-variance-diagnosis/SKILL.md) — LLM-judge eval verdict 跨重跑抖动时先辨 variance 来源再修：读 reasoning，同输出→不同分=judge 变异(收紧 criteria)，不同输出→agent 变异(修 prompt)；probe 用 majority-of-3。Source: session-derived 2026-06-30
 - [agent-prompt-edit-gate](./agent-prompt-edit-gate/SKILL.md) — 改 agent prompt body 强制跑 before/after eval 对比 pass rate，改 frontmatter 不触发；含四条铁律(退出码判 pass 别用管道 / 只跑 --agent / implementer 无工具沙盒 caveat / probe majority-of-3)。Source: migrated from CLAUDE.md 2026-08-04
 - [ui-design-pipeline](./ui-design-pipeline/SKILL.md) — 界面设计任务四段 pipeline：Design Bridge 门卫(Replication 复刻 / Genesis 创世)→ frontend-design plugin 执行 → Frontend Developer 落地 → /diff·build·/review。Source: migrated from CLAUDE.md 2026-08-04
