@@ -25,8 +25,17 @@ PID_FILE="${RUN_DIR}/daemon.pid"
 LOG_FILE="${RUN_DIR}/daemon.log"
 PREV_LOG_FILE="${RUN_DIR}/daemon.log.prev"
 READY_FILE="${RUN_DIR}/daemon.ready"
+AUDIO_BUSY_FILE="${RUN_DIR}/audio_op.busy"
 LOCK_DIR="${RUN_DIR}/.start.lock"
 DISABLE_FILE="${RUN_DIR}/autostart.disabled"
+
+# mkdir 启动锁被认定「陈旧」的年龄阈值（秒）。正常的 start_background 流程
+# 一秒内就完事（见下方 sleep 0.6 的探活），超过这个阈值还残留，基本可以
+# 断定是上次异常强杀（比如 SIGKILL）导致 EXIT trap 没机会跑、rmdir 从未
+# 执行，而不是真的有并发的启动流程在跑。不清掉的话 autostart 会永久静默
+# 失效——quiet 模式下"抢不到锁就直接放弃"一个字都不打印，用户完全无感知
+# （2026-09-01 专家团审核指出）。
+STALE_LOCK_SECONDS=30
 
 # 由 start.sh 传入；单独跑本文件时退回默认落点。
 VOICE_PYTHON="${VOICE_PYTHON:-${RUN_DIR}/venv/bin/python}"
@@ -35,6 +44,13 @@ VOICE_DAEMON_PY="${VOICE_DAEMON_PY:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd
 # voice_daemon.py 就绪后会 touch 这个文件，退出时删掉 —— status 靠它区分
 # 「进程活着但还在下/载模型」和「真的在听了」。
 export VOICE_READY_FILE="${READY_FILE}"
+
+# voice_daemon.py 在跑开/关流这类可能卡死的原生调用期间会 touch 这个文件，
+# 完成后删掉 —— status 靠它的存在时长判断是不是卡在音频操作里，这种「进程
+# 活着、也不是在下模型、但按键静默无响应」的半死状态之前完全不可观测
+# （2026-09-01 专家团审核指出：新加的 _audio_op_lock 会让卡死从「彻底冻死」
+# 变成「静默空等最长 MAX_SECONDS 才放弃」，但没有任何外部信号能看出这一点）。
+export VOICE_AUDIO_BUSY_FILE="${AUDIO_BUSY_FILE}"
 
 # ---------------------------------------------------------------- 工具 ----
 
@@ -69,8 +85,21 @@ start_background() {
   # 免得拉起两个实例抢麦克风。
   mkdir -p "${RUN_DIR}"
   if ! mkdir "${LOCK_DIR}" 2>/dev/null; then
-    [[ "${quiet}" == "1" ]] || echo "另一个启动流程正在进行，跳过。"
-    return 0
+    # 抢不到锁不代表真的有并发——也可能是上次异常强杀留下的残留（见上方
+    # STALE_LOCK_SECONDS 的注释）。用 mtime 判断陈旧，陈旧就强制清掉重抢一次。
+    local lock_mtime lock_age
+    lock_mtime="$(stat -f %m "${LOCK_DIR}" 2>/dev/null || echo 0)"
+    lock_age=$(( $(date +%s) - lock_mtime ))
+    if (( lock_age > STALE_LOCK_SECONDS )); then
+      rmdir "${LOCK_DIR}" 2>/dev/null
+      if ! mkdir "${LOCK_DIR}" 2>/dev/null; then
+        [[ "${quiet}" == "1" ]] || echo "另一个启动流程正在进行，跳过。"
+        return 0
+      fi
+    else
+      [[ "${quiet}" == "1" ]] || echo "另一个启动流程正在进行，跳过。"
+      return 0
+    fi
   fi
   trap 'rmdir "${LOCK_DIR}" 2>/dev/null' EXIT
 
@@ -133,6 +162,19 @@ cmd_status() {
     local last
     last="$(tail -n 1 "${LOG_FILE}" 2>/dev/null)"
     [[ -n "${last}" ]] && echo "  最后一行：${last}"
+    # 「进程活着、也不在下模型」不等于「按键真的有响应」——如果正卡在开/关流
+    # 这类原生调用里，daemon.py 会 touch AUDIO_BUSY_FILE，这里读它的年龄，
+    # 别让这种半死状态完全不可见（2026-09-01 专家团审核指出的 mustFix）。
+    if [[ -f "${AUDIO_BUSY_FILE}" ]]; then
+      local busy_started busy_age
+      busy_started="$(cut -d. -f1 <"${AUDIO_BUSY_FILE}" 2>/dev/null)"
+      if [[ "${busy_started}" =~ ^[0-9]+$ ]]; then
+        busy_age=$(( $(date +%s) - busy_started ))
+        if (( busy_age > 3 )); then
+          echo "  ⚠️ 音频操作已持续 ${busy_age}s 未完成——正常应是毫秒级，疑似卡在开/关流；最长会自动放弃一次按键，不需要手动 stop"
+        fi
+      fi
+    fi
   else
     if [[ -f "${PID_FILE}" ]]; then
       echo "未运行（清掉了一个残留 pidfile）"

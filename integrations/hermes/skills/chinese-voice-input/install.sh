@@ -14,7 +14,7 @@ echo "    venv 目标  : ${VENV_DIR}"
 echo
 
 # --- 1. 环境前置检查 -------------------------------------------------------
-echo "[1/5] 检查环境"
+echo "[1/6] 检查环境"
 if [[ "$(uname -s)" != "Darwin" ]]; then
   echo "  FAIL 这个 skill 只支持 macOS。" >&2
   exit 1
@@ -34,7 +34,7 @@ echo
 # --- 2. ffmpeg -------------------------------------------------------------
 # daemon 本身把音频以 numpy 数组直接喂给 whisper，不走 ffmpeg；
 # 但 whisper 的音频加载路径在处理文件时会调它，装上省得以后踩。
-echo "[2/5] 检查 ffmpeg"
+echo "[2/6] 检查 ffmpeg"
 if command -v ffmpeg >/dev/null 2>&1; then
   echo "  ok   已安装：$(command -v ffmpeg)"
 else
@@ -49,7 +49,7 @@ fi
 echo
 
 # --- 3. venv ---------------------------------------------------------------
-echo "[3/5] 创建 venv"
+echo "[3/6] 创建 venv"
 if [[ -d "${VENV_DIR}" ]]; then
   echo "  ok   已存在，复用：${VENV_DIR}"
 else
@@ -61,7 +61,7 @@ fi
 echo
 
 # --- 4. 依赖 ---------------------------------------------------------------
-echo "[4/5] 安装 Python 依赖：mlx-whisper / pynput / sounddevice / numpy"
+echo "[4/6] 安装 Python 依赖：mlx-whisper / pynput / sounddevice / numpy"
 echo "      （首次会拉 mlx 及其依赖，约 1-3 分钟；这一步只下代码，不下模型权重）"
 "${VENV_DIR}/bin/python" -m pip install mlx-whisper pynput sounddevice numpy
 echo "  ok   依赖装好"
@@ -70,7 +70,7 @@ echo
 # --- 5. 启动脚本 -----------------------------------------------------------
 # start.sh 是**每次重装都重新生成**的薄壳，真正的起停逻辑在 skill 目录的 voicectl.sh；
 # 用户改热键/模型写在 config.sh 里，那个文件**只在不存在时创建**，重装不会冲掉。
-echo "[5/5] 生成启动脚本"
+echo "[5/6] 生成启动脚本"
 LAUNCHER="${HOME_DIR}/.claude-voice-cn/start.sh"
 CONFIG="${HOME_DIR}/.claude-voice-cn/config.sh"
 
@@ -135,6 +135,67 @@ EOF
 chmod +x "${LAUNCHER}"
 chmod +x "${SKILL_DIR}/voicectl.sh" 2>/dev/null || true
 echo "  ok   ${LAUNCHER}"
+echo
+
+# --- 6. 健康检查定时重启（healthcheck.sh + launchd）------------------------
+# healthcheck.sh 的**执行入口**必须落在 ~/.claude-voice-cn，不能留在 skill 目录
+# （~/Desktop/... 下）——launchd 拉起的无 GUI 会话没有 Terminal.app 那种 macOS
+# TCC「文件和文件夹」授权，读取 ~/Desktop / ~/Documents / ~/Downloads 下的文件
+# 会直接 EPERM，表现为 healthcheck.err.log 里全是 "Operation not permitted"、
+# 且没有任何更明显的报错（2026-09-01 实测坐实：plist 装了又 bootstrap 了，
+# 但因为这个原因，从未真正跑成功过一次）。跟 start.sh 同样的拆法：
+# skill 目录放源码（进 git），~/.claude-voice-cn 放运行时入口（不进 git，
+# 每次装都可以放心重新生成，不像 config.sh 那样需要保留用户改动）。
+echo "[6/6] 配置健康检查定时重启"
+HEALTHCHECK_RUNTIME="${HOME_DIR}/.claude-voice-cn/healthcheck.sh"
+PLIST_PATH="${HOME_DIR}/Library/LaunchAgents/com.colar.voice-cn-healthcheck.plist"
+
+cp "${SKILL_DIR}/healthcheck.sh" "${HEALTHCHECK_RUNTIME}"
+chmod +x "${HEALTHCHECK_RUNTIME}"
+
+mkdir -p "$(dirname "${PLIST_PATH}")"
+cat > "${PLIST_PATH}" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.colar.voice-cn-healthcheck</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>${HEALTHCHECK_RUNTIME}</string>
+    </array>
+
+    <!-- 每 30 分钟跑一次。脚本自己判断要不要真的重启（daemon 没在跑 / 没到运行时长阈值 /
+         正在录音转录中 都会直接跳过），这里只负责按周期把它叫起来。 -->
+    <key>StartInterval</key>
+    <integer>1800</integer>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>${HOME_DIR}/.claude-voice-cn/healthcheck.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>${HOME_DIR}/.claude-voice-cn/healthcheck.err.log</string>
+
+    <key>WorkingDirectory</key>
+    <string>${HOME_DIR}/.claude-voice-cn</string>
+</dict>
+</plist>
+EOF
+
+# bootout 再 bootstrap（而不是只 bootstrap）：确保这次改动（比如换了运行时路径）
+# 在已经装过一次的机器上也能真正生效，不会因为「已经 bootstrap 过」被当成幂等跳过。
+launchctl bootout "gui/$(id -u)" "${PLIST_PATH}" >/dev/null 2>&1 || true
+if launchctl bootstrap "gui/$(id -u)" "${PLIST_PATH}" 2>/dev/null; then
+  echo "  ok   健康检查已装并激活（每 30 分钟检查一次，daemon 存活超阈值才重启一次）"
+else
+  echo "  !!   launchctl bootstrap 失败，健康检查未激活。手动跑：" >&2
+  echo "         launchctl bootstrap \"gui/\$(id -u)\" ${PLIST_PATH}" >&2
+fi
 echo
 
 cat <<EOF

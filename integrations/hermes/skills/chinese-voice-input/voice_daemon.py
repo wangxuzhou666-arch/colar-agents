@@ -71,6 +71,16 @@ TYPE_DELAY = float(os.environ.get("VOICE_TYPE_DELAY", "0.008"))
 # 靠这个文件区分「进程活着但还在下/载模型」和「真的在听了」。留空则不写。
 READY_FILE = os.environ.get("VOICE_READY_FILE", "")
 
+# 单个原生调用（开流/关流/刷新设备表）的超时上限。正常情况下这些都是毫秒级，
+# 10s 已经相当宽松——一旦触发，基本可以断定这次调用卡死在 CoreAudio 内部，
+# 不值得再等。见 _call_with_timeout 和 2026-09-01 的死锁复盘
+# （INCIDENT-2026-08-hang-on-release.md 第四次事故）。
+NATIVE_CALL_TIMEOUT = float(os.environ.get("VOICE_NATIVE_CALL_TIMEOUT", "10"))
+
+# 音频操作「正在进行中」标记文件。由 voicectl.sh 传入；status 靠它的存在时长
+# 判断是不是卡在开/关流里——单靠"进程活着"和"是否就绪"看不出这种半死状态。
+AUDIO_BUSY_FILE = os.environ.get("VOICE_AUDIO_BUSY_FILE", "")
+
 
 def log(msg: str) -> None:
     # 带时间戳：后台模式下这些行是落在 daemon.log 里的，没有时间戳没法排障。
@@ -95,6 +105,53 @@ def clear_ready() -> None:
         os.unlink(READY_FILE)
     except OSError:
         pass
+
+
+def mark_audio_busy() -> None:
+    if not AUDIO_BUSY_FILE:
+        return
+    try:
+        os.makedirs(os.path.dirname(AUDIO_BUSY_FILE), exist_ok=True)
+        with open(AUDIO_BUSY_FILE, "w") as fh:
+            fh.write(f"{time.time()}\n")
+    except OSError:
+        pass
+
+
+def clear_audio_busy() -> None:
+    if not AUDIO_BUSY_FILE:
+        return
+    try:
+        os.unlink(AUDIO_BUSY_FILE)
+    except OSError:
+        pass
+
+
+def call_with_timeout(fn, timeout: float, what: str) -> None:
+    """在独立线程里跑一个可能卡死在原生代码里的调用，超时就不再等它。
+
+    Python 没有安全的办法强杀一条卡在 C 层的线程——超时之后，跑 fn() 的那条
+    线程会继续挂在那里，变成一个永远不返回的孤儿 daemon 线程，泄漏但无害
+    （不持有 GIL 之外的 Python 层资源）。代价换来的好处是：调用方不会因为
+    fn() 卡死就永远拿不到控制权——这正是 2026-09-01 复盘出的教训：光给
+    "拿锁"这一步加超时不够，锁内部真正执行的原生调用本身也可能永远不返回，
+    不加这层超时的话，锁会被永久占住，之后所有按键都要等满 MAX_SECONDS 才放弃。
+    """
+    error: list[BaseException] = []
+
+    def _runner() -> None:
+        try:
+            fn()
+        except BaseException as exc:  # noqa: BLE001 —— 原样转发给调用方处理
+            error.append(exc)
+
+    thread = threading.Thread(target=_runner, daemon=True)
+    thread.start()
+    thread.join(timeout)
+    if thread.is_alive():
+        raise RuntimeError(f"{what}超过 {timeout:.0f}s 未返回，判定卡死，放弃等待")
+    if error:
+        raise error[0]
 
 
 # ------------------------------------------------------------- 热键解析 ----
@@ -146,6 +203,14 @@ class Recorder:
         self._stream: sd.InputStream | None = None
         self._frames: list[np.ndarray] = []
         self._lock = threading.Lock()
+        # 串行化所有会碰 CoreAudio 的流操作——不只是"两次开流"，
+        # 更要命的是"上一次录音的关流（_detach_stream 里的 stream.stop()/close()）
+        # 跟这一次的开流（start()）并发撞在同一把设备级互斥锁上"。这是 2026-09-01
+        # 用 `sample` 抓到真实线程栈坐实的死锁：一个线程卡在
+        # HALC_ShellDevice::StopIOProc 的 HALB_Mutex::Lock()，另一个线程同时卡在
+        # HALC_ShellDevice::CreateIOProcID 的同一把锁——PortAudio/CoreAudio 不保证
+        # 并发 stop+start 安全。见 INCIDENT-2026-08-hang-on-release.md 第四次事故。
+        self._audio_op_lock = threading.Lock()
 
     @staticmethod
     def _pick_sample_rate() -> int:
@@ -164,25 +229,39 @@ class Recorder:
             self._frames.append(indata[:, 0].copy())
 
     def start(self) -> None:
-        if self._stream is not None:
+        # acquire 加超时：万一上一次开流真的卡死不返回，也只让这次按键等到
+        # MAX_SECONDS 就放弃，而不是无限期跟着一起冻住（那样每次新按键都会在
+        # 这把锁上再叠一个永久阻塞的线程，跟没加锁时的并发撞车是两种坏法，
+        # 但都不该让人只能靠 stop 才能恢复）。
+        if not self._audio_op_lock.acquire(timeout=MAX_SECONDS):
+            log("音频操作锁等待超时，疑似上一次开/关流卡死未释放，本次按键放弃录音。")
             return
-        with self._lock:
-            self._frames = []
+        mark_audio_busy()
         try:
-            self._open_stream()
-        except Exception as exc:
-            # 睡眠/唤醒或耳机蓝牙热插拔之后，PortAudio 缓存的设备表会失效，
-            # 表现为反复报 -9986 / Invalid Property Value 之类的错误（2026-08-28 实测）。
-            # 只重开一个新 stream 不够——PortAudio 的主机 API 状态本身要刷新才行。
-            # sd._terminate()/_initialize() 是 sounddevice 没有公开但社区通行的刷新法。
-            log(f"打开音频流失败（{exc}），尝试刷新音频设备表后重试一次…")
+            if self._stream is not None:
+                return
+            with self._lock:
+                self._frames = []
             try:
-                sd._terminate()
-                sd._initialize()
-                self.sample_rate = self._pick_sample_rate()
-                self._open_stream()
-            except Exception as retry_exc:
-                raise RuntimeError(f"刷新设备表后仍失败：{retry_exc}") from retry_exc
+                call_with_timeout(self._open_stream, NATIVE_CALL_TIMEOUT, "开流")
+            except Exception as exc:
+                # 睡眠/唤醒或耳机蓝牙热插拔之后，PortAudio 缓存的设备表会失效，
+                # 表现为反复报 -9986 / Invalid Property Value 之类的错误（2026-08-28 实测）。
+                # 只重开一个新 stream 不够——PortAudio 的主机 API 状态本身要刷新才行。
+                # sd._terminate()/_initialize() 是 sounddevice 没有公开但社区通行的刷新法，
+                # 它本身也是已知会卡死的原生调用，同样套 call_with_timeout。
+                log(f"打开音频流失败（{exc}），尝试刷新音频设备表后重试一次…")
+                try:
+                    call_with_timeout(
+                        lambda: (sd._terminate(), sd._initialize()), NATIVE_CALL_TIMEOUT, "刷新设备表"
+                    )
+                    self.sample_rate = self._pick_sample_rate()
+                    call_with_timeout(self._open_stream, NATIVE_CALL_TIMEOUT, "刷新后重新开流")
+                except Exception as retry_exc:
+                    raise RuntimeError(f"刷新设备表后仍失败：{retry_exc}") from retry_exc
+        finally:
+            clear_audio_busy()
+            self._audio_op_lock.release()
 
     def _open_stream(self) -> None:
         self._stream = sd.InputStream(
@@ -201,17 +280,28 @@ class Recorder:
         CoreAudio 没如期返回，把调用它的 pynput 监听线程整个冻住，
         之后所有按键都没反应，看门狗也救不了——因为它检查的是「按住没松开」，
         这里是「松开了但处理卡住」，是两回事）。音频帧已经在锁保护下拿到手，
-        关流这个动作不影响已采集的数据，没必要为它阻塞调用方。"""
+        关流这个动作不影响已采集的数据，没必要为它阻塞调用方。
+
+        关流也要抢 _audio_op_lock（跟 start() 共用）——2026-09-01 用 `sample`
+        实测坐实：上一次关流跟下一次开流并发调用会在 CoreAudio 的 HALB_Mutex
+        上死锁（两个线程各卡在 StopIOProc / CreateIOProcID 里等同一把锁）。
+        不加锁就异步丢后台线程，等于放任这场竞争发生。"""
         stream, self._stream = self._stream, None
         with self._lock:
             frames, self._frames = self._frames, []
         if stream is not None:
             def _detach_stream() -> None:
+                if not self._audio_op_lock.acquire(timeout=MAX_SECONDS):
+                    log("音频操作锁等待超时，疑似开流卡死未释放，本次关流放弃。")
+                    return
+                mark_audio_busy()
                 try:
-                    stream.stop()
-                    stream.close()
+                    call_with_timeout(lambda: (stream.stop(), stream.close()), NATIVE_CALL_TIMEOUT, "关流")
                 except Exception as exc:
                     log(f"后台关闭音频流出错（不影响本次识别）：{exc}")
+                finally:
+                    clear_audio_busy()
+                    self._audio_op_lock.release()
 
             threading.Thread(target=_detach_stream, daemon=True).start()
         if not frames:
@@ -287,6 +377,7 @@ class Daemon:
         self.busy = False
         self.press_time: float | None = None  # 看门狗用：判断"按住"是否已经超时
         self._stop_watchdog = threading.Event()
+        self._recording_started = threading.Event()  # _finish_recording 等它，避免跟 start() 抢流
 
     # -- 键盘回调（跑在 pynput 的监听线程上，必须快，重活丢给 worker） --
 
@@ -294,14 +385,23 @@ class Daemon:
         if key != self.hotkey or self.held:
             return
         self.held = True
+        self.press_time = time.monotonic()
         if self.busy:
             log("上一句还在转录，本次录音先排队…")
+        # recorder.start() 丢给后台线程，同理不在监听线程上做任何可能碰 CoreAudio
+        # 的事——开流本身也会卡（睡眠唤醒后设备表失效的重试路径），2026-08-29
+        # 实测命中过：卡住时连"录音中"都打不出来，表现为按下彻底没反应。
+        self._recording_started.clear()
+        threading.Thread(target=self._start_recording, daemon=True).start()
+
+    def _start_recording(self) -> None:
         try:
             self.recorder.start()
-            self.press_time = time.monotonic()
             log("录音中… 松开热键结束")
         except Exception as exc:
             log(f"麦克风打开失败：{exc}（多半是没给麦克风权限，见 SKILL.md）")
+        finally:
+            self._recording_started.set()
 
     def on_release(self, key: object) -> None:
         if key != self.hotkey or not self.held:
@@ -317,6 +417,10 @@ class Daemon:
     def _finish_recording(self) -> None:
         """真正处理一次录音：停流 → 太短就丢 → 排进转录队列。
         on_release（经后台线程）和看门狗（松开信号丢失兜底）共用这一段。"""
+        # 先等 _start_recording 把流开完（或放弃），避免跟它抢 self._stream——
+        # 按住时间通常远大于开流耗时，等待只在开流本身卡住时才会体现出来，
+        # 这时等的是后台线程而不是监听线程，不影响下一次按键。
+        self._recording_started.wait(MAX_SECONDS)
         try:
             audio = self.recorder.stop()
         except Exception as exc:

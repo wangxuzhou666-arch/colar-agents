@@ -30,12 +30,13 @@ pynput 的键盘监听跑在**一条专用线程**上（不是主线程）。这
 
 - ✅ 已验证：`on_release` → 起新线程 → `_finish_recording` → `recorder.stop()` 阻塞，
   listener 线程不受影响，下一次按键正常触发（本次修复后跑通，daemon 当前存活 pid 已确认是修复后重启的实例）。
-- ⚠️ **残留同类风险，刻意没动**：`on_press` 里的 `self.recorder.start()` 仍是**同步调用**——
-  如果开流本身卡住（比如设备表刷新那条 fallback 路径本身又卡住），listener 线程一样会冻，
-  但表现会是"按下没反应"而不是这次报告的"松开卡死"，属于不同症状、暂无实测证据。
-  没有顺手把它也挪线程，是因为：(a) 本次事故报告的症状明确是松开侧，不该借机扩大改动范围；
-  (b) 08-28 已经在 `start()` 内部加了一次自愈重试，理论上覆盖了最常见的触发源（睡眠唤醒）。
-  如果以后真的观测到"按下没反应"的新事故，这是第一个该看的地方。
+- ✅ **残留风险已命中并修复（2026-08-29 稍晚，同日第二次修复）**：`on_press` 里的
+  `self.recorder.start()` 当时仍是同步调用，果然如预判炸了——开流卡住，listener 线程冻死，
+  连"录音中"都打不出来，表现正是"按下彻底没反应"。修法同款：把它也挪进 `_start_recording`
+  后台线程；`_finish_recording`（on_release 那侧）加一个 `threading.Event`
+  （`_recording_started`）在调用 `recorder.stop()` 前等 `_start_recording` 完成，
+  避免两个后台线程抢 `self._stream`——正常按键时开流是毫秒级，这个等待感知不到；
+  只有开流本身卡住时才会体现为"等的是后台线程，不是监听线程"，不影响下一次按键。
 
 ## 第四道防线：healthcheck.sh 定时重启（**本次事故顺带发现它没生效**）
 
@@ -92,3 +93,94 @@ hang bug 后又在 05:33:42 左右起了一个后台实例（新代码，有 pid
 这样无论谁先起（前台先、后台先），另一侧的单实例检查都能看见对方，不会再出现两个
 daemon 同时抢同一个热键的情况。**用完前台记得 `stop` 或 Ctrl+C**——退出后 pidfile
 会变成指向死进程，下次 `status`/`start`/`stop` 时按现有逻辑自动清掉，不用手动处理。
+
+## 第四次事故（2026-09-01，两轮：先打了个不够的补丁，复现后拿到真实线程栈，确认根因）
+
+### 第一轮：假设性修复（已证明不够）
+
+Colar 报告：短按（<1s）热键后 daemon 彻底冻结，必须 `stop` 才能恢复。当时没能在冻结现场
+留下线程栈，只能读代码推出一个假设——`Recorder.start()` 没有互斥锁，两次快速连按可能
+并发调用 `sd.InputStream()` 撞车——据此给 `start()` 加了一把 `_start_lock`。**这个修复
+只包住了 `start()`，完全没碰 `Recorder.stop()` 里 `_detach_stream()` 的 `stream.stop()/close()`**，
+补丁上线后同一会话内很快又复现了同样的冻结，证明假设不完整。
+
+### 第二轮：复现时用 `sample` 抓到真实线程栈，确认根因
+
+冻结复现时执行 `/usr/bin/sample <pid> 3 -file <out>`（注意：`sample` 这个命令名被
+mlx-whisper 依赖链里某个同名 Python 包的 entry point 脚本shadow 了，`which sample` 会
+先命中 `.../Python.framework/.../bin/sample` 报 `ModuleNotFoundError`，必须显式用
+`/usr/bin/sample` 全路径调用系统自带的那个）。3 秒采样清楚拍到三个线程同时卡死：
+
+- **Thread（Python，`_detach_stream` 里跑上一次录音的 `stream.stop()`）**：调用链
+  `FinishStoppingStream → AudioOutputUnitStop → AudioDeviceStop_mac_imp →
+  HALC_ShellDevice::StopIOProc → HALC_ProxyIOContext::StopIOProc → HALB_Mutex::Lock()`，
+  卡在 `__psynch_mutexwait` 上等一把设备级互斥锁。
+- **Thread（Python，`start()` 里跑这一次新按键的 `sd.InputStream(...)` 开流）**：调用链
+  `Pa_OpenStream → OpenStream → OpenAndSetupOneAudioUnit → AudioUnitSetProperty →
+  AudioDeviceCreateIOProcID_mac_imp → HALC_ShellDevice::CreateIOProcID →
+  HALB_Mutex::Lock()`——**卡在同一把 `HALB_Mutex`**。
+- **`com.apple.audio.IOThread.client`（CoreAudio 自己的 IO 线程，不是我们的代码）**：
+  同时卡在 `AudioUnitGetProperty` 内部的 `std::recursive_mutex::lock()`，被上面两个
+  线程的锁争用连带卡住。
+
+**确认根因**：不是"两次开流并发"，是**"上一次录音的关流（异步 `_detach_stream`）跟
+这一次的开流（`start()`）并发撞在了 CoreAudio 同一把设备级互斥锁上"**。08-27 的修复
+把关流这个动作丢进了完全不设防的后台线程（理由是"不影响已采集数据，没必要阻塞调用方"），
+这个理由本身没错，但代价是它跟同样跑在后台线程的 `start()` 之间毫无互斥——两者独立
+异步、各自去碰同一个 PortAudio `Recorder` 实例背后的同一个物理设备，PortAudio/CoreAudio
+不保证这种跨调用的并发安全。`start()` 那把新加的 `_start_lock` 完全帮不上，因为
+`_detach_stream` 根本不认这把锁。
+
+复现时 `SIGTERM` 5 秒没能让进程退出，最后是 `SIGKILL` 杀掉的——侧面印证这是内核态
+mutex 等待级别的真死锁，不是 Python 层面能被信号打断的阻塞。
+
+**已修复**（`voice_daemon.py` `Recorder`）：把锁改名为 `_audio_op_lock`（不再只是
+"start 锁"），`start()` 和 `stop()` 里的 `_detach_stream()` 现在共用同一把锁，
+两边都 `acquire(timeout=MAX_SECONDS)` 兜底——任何时候只允许一个方向（开或关）在跟
+CoreAudio 打交道，另一个必须排队等它先完成（正常情况下开/关流都是毫秒级，排队感知
+不到）；万一真卡死，等满 2 分钟后放弃而不是无限叠加等待。**这次是有真实线程栈证据
+坐实的修复，不是纯代码推理**——但仍然建议留意：如果以后再冻，机制同上，先
+`/usr/bin/sample <pid> 3 -file <out>` 留证据再 `stop`。
+
+### 第三轮：专家团审核 + 同一会话内真实复现，补齐 4 处 mustFix
+
+补丁上线后同一会话内很快真实复现了一次（这次不再需要 `stop`，daemon 自己在
+120s 超时后恢复，日志留了 `音频操作锁等待超时` 这行）——证明底层 CoreAudio 死锁
+本身还会发生，锁只是把"必须 stop 才能救"降级成"最长 2 分钟自动放弃"，没有消灭
+根因。同时叫了 4 位专家（并发/CoreAudio底层/系统可靠性/代码质量安全）做对抗审核，
+17 条 claim 里 3 条被硬证据驳倒，剩下的收敛出 4 个 mustFix，均已修复：
+
+1. **`healthcheck.sh`（第四道防线）实测从 8-31 起持续失败，`Operation not permitted`**——
+   根因是 launchd 拉起的 `/bin/bash` 没有 Terminal.app 那种 macOS TCC「文件和文件夹」
+   授权，读不了 `~/Desktop` 下的脚本。修法：`install.sh` 新增第 6 步，把
+   `healthcheck.sh` 拷贝到运行时目录 `~/.claude-voice-cn/healthcheck.sh`（跟
+   `start.sh`/`config.sh` 同样的"skill 目录放源码、`~/.claude-voice-cn` 放运行时入口"
+   拆法），并自动 `launchctl bootout` + `bootstrap` 让 plist 指向新路径。已现场验证：
+   `launchctl kickstart` 触发一次，`healthcheck.err.log` 不再新增报错。
+2. **`sd._terminate()/_initialize()` 刷新调用没有独立超时**，且现在被包进了
+   `_audio_op_lock` 里——一旦它卡死，整把锁会被永久占住，之后每次按键都要
+   干等满 `MAX_SECONDS` 才放弃。**审查后发现这个风险面比专家团指出的更广**：
+   `_open_stream()`（真正的 `sd.InputStream(...)` 开流调用）和 `stream.stop()/close()`
+   本身也是没有独立超时的原生调用，任何一个卡死都是同样的"锁永久泄漏"后果——
+   这正是本轮真实复现时很可能命中的那个点（复现时日志里没有"打开音频流失败"这行，
+   说明卡的不是刷新重试分支，是主路径本身）。修法：新增 `call_with_timeout()`
+   （独立线程跑原生调用 + `join(timeout=NATIVE_CALL_TIMEOUT=10s)`，超时就不再等），
+   包住 `_open_stream()`（含重试路径）和 `_detach_stream()` 里的 `stop()/close()`。
+   超时后底层线程会变成一个永远不返回的孤儿 daemon 线程（泄漏但无害），换来的是
+   `_audio_op_lock` 保证在 ~10s 内释放，不会再被单个卡死的原生调用拖到 2 分钟。
+3. **`voicectl.sh` 的 mkdir 启动锁没有陈旧检测**——一次异常强杀（比如这次复现用的
+   `SIGKILL`）会让 `EXIT trap` 没机会跑，`.start.lock` 目录永久残留，之后 autostart
+   静默判定"已有启动流程在跑"直接放弃、零提示。修法：`start_background()` 抢锁失败时
+   先看 `.start.lock` 的 mtime，超过 `STALE_LOCK_SECONDS=30`（正常启动流程 1 秒内
+   完事）就判定陈旧，强制 `rmdir` 后重新抢一次。
+4. **新锁把冻结变成了完全不可观测的静默空等**——`status`/`healthcheck` 都读不到
+   "现在卡在开/关流里多久了"。修法：`voice_daemon.py` 在持有 `_audio_op_lock` 期间
+   `touch` `~/.claude-voice-cn/audio_op.busy`（写入时间戳），释放锁时删掉；
+   `voicectl.sh status` 读这个文件的年龄，超过 3 秒就打印一行明确提示
+   （"音频操作已持续 Ns 未完成……不需要手动 stop"），不再是纯粹的黑箱。
+
+**仍未解决、专家团标记为 contested、不阻塞本次 commit**：四层防线（listener 线程
+隔离 / stop 异步化 / watchdog / 本次锁）是否该用子进程隔离这类更根本方案统一取代。
+代码自身注释已经反驳"四层同源可被一次重构统一取代"——watchdog 防的是 macOS 偶发
+丢失键盘松开事件，跟线程卡在原生调用是完全不同的失败模式，重构后大概率还得留着。
+值得排期单独评估，但不是这次的阻塞项。
