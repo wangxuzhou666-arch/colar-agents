@@ -80,7 +80,7 @@ Master: ~/Desktop/colar-agents/  ← 单一真相源（全局走 symlink、项�
 
 **全局 agent（Tier 1）机制**：`~/.claude/agents/*.md` 是指向 master 的 **symlink**，手动创建：`ln -s ~/Desktop/colar-agents/<domain>/<file>.md ~/.claude/agents/<file>.md`。**只编辑 master 文件**——symlink 让改动即时对 Claude Code 生效；绝不在 `~/.claude/agents/` 放非 symlink 文件（破坏单一真相源）。
 
-**项目 agent（Tier 2）机制**：项目的 `.claude/agent-config.yaml` 声明需要哪些 agent，运行 `bash scripts/sync-all.sh` 从 master library 复制到项目的 `.claude/agents/`；新增单项目：编辑该项目 `agent-config.yaml` 后跑 `bash ~/Desktop/colar-agents/scripts/sync-agents.sh <project-path>`。**不要手动往项目 `.claude/agents/` 放文件**——项目层用 sync 脚本管理。
+**项目 agent（Tier 2）机制**：项目的 `.claude/agent-config.yaml` 声明需要哪些 agent，运行 `bash scripts/sync-all.sh` 从 master library 复制到项目的 `.claude/agents/`；新增单项目：编辑该项目 `agent-config.yaml` 后跑 `bash ~/Desktop/colar-agents/scripts/sync-agents.sh <project-path>`。**不要手动往项目 `.claude/agents/` 放文件**——项目层用 sync 脚本管理。**唯一例外类**：知识 100% 绑定单一项目、对其他项目零复用价值的项目专属 agent，可手写进该项目 `.claude/agents/` 并在该项目文档里记录破例（sync 机制不支持"项目独占、master 无副本"物种；master 收单项目 agent 会在大清理中被当死库存砍掉——2026-08-31 e31818d 实证）。先例：织锦 `fabric-architect`（2026-09-01 拍板，破例记录在该 repo `docs/collaboration-boundaries.md` §8.5）。
 
 ---
 
