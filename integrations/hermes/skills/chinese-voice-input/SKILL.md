@@ -52,20 +52,38 @@ Claude Code 内置的 `/voice` 听写不支持中文。这个 skill 用一个自
 | pidfile / 就绪标记 | `~/.claude-voice-cn/daemon.pid` · `daemon.ready` |
 | 关掉自动拉起的开关文件 | `~/.claude-voice-cn/autostart.disabled` |
 | 模型权重缓存 | `~/.cache/huggingface/hub/`（mlx-whisper 自动管理） |
-| 定期重启兜底脚本 | `~/Desktop/colar-agents/integrations/hermes/skills/chinese-voice-input/healthcheck.sh` |
+| healthcheck 源文件（进 git） | `~/Desktop/colar-agents/integrations/hermes/skills/chinese-voice-input/healthcheck.sh` |
+| **healthcheck 运行时副本**（plist 真正跑的是这个，改完源文件要 cp 过来） | `~/.claude-voice-cn/healthcheck.sh` |
+| healthcheck 日志 / 故障重启时间戳 | `~/.claude-voice-cn/healthcheck.{out,err}.log` · `healthcheck.last_fault_restart` |
 | 定期重启的 launchd 任务定义 | `~/Library/LaunchAgents/com.colar.voice-cn-healthcheck.plist` |
 
 代码住 skill 目录（跟 colar-agents 一起进 git），运行时环境住 `~/.claude-voice-cn/`（不进 git）。
 
-**第四道防线：定期重启**。daemon 存活超过 `VOICE_MAX_UPTIME_HOURS`（默认 2 小时）且当前没在
-录音/转录，`healthcheck.sh` 就会主动 `restart` 一次——不指望堵住所有可能的阻塞点，见招拆招见不完，
-定期重开换稳定性。由 `com.colar.voice-cn-healthcheck.plist`（每 30 分钟触发一次检查）驱动。
+**第四道防线：healthcheck 兜底**。`healthcheck.sh` 由 `com.colar.voice-cn-healthcheck.plist`
+每 30 分钟拉起一次，有**两条独立的触发路径**：
+
+- **故障触发**（2026-09-01 加）：读 `daemon.log`，若「最后一条故障行」出现在「最后一条成功识别行」
+  之后，判定当前处于故障态，**立刻 restart，不等 uptime 阈值**。判据用**行序**不用时间戳——
+  日志行只有 `HH:MM:SS` 没有日期，跨天比时间会翻车。带 `VOICE_FAULT_COOLDOWN_SECONDS`（默认 3600）
+  冷却：权限缺失这类 restart 修不好的病会让故障态一直成立，没冷却就成了每 30 分钟无效重启一次。
+- **预防性重启**：daemon 存活超过 `VOICE_MAX_UPTIME_HOURS`（默认 2 小时）且当前没在录音/转录，
+  主动 `restart` 一次——不指望堵住所有可能的阻塞点，见招拆招见不完，定期重开换稳定性。
+
+为什么两条都要：2026-09-01 撞上 CoreAudio 卡死（开流/关流/刷新设备表三个调用全部超时 10s），
+daemon 进程还活着、`status` 仍报「已就绪」，但 uptime 没满 2h → 预防性那条直接跳过，全程没兜住。
+**预防性重启探不到「没跑满阈值就坏掉」，故障触发探不到「还没坏但快坏了」，两条是互补不是冗余。**
 
 ⚠️ **`install.sh` 不会自动装这个 launchd 任务**——plist 文件存在不等于它在跑，必须手动
 `launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/com.colar.voice-cn-healthcheck.plist`
-才会真正生效。`launchctl print "gui/$(id -u)/com.colar.voice-cn-healthcheck"` 能查到就是装上了。
-（2026-08-29 实测过一次：plist 装了整整一天从未被 bootstrap，这道防线全程没生效，见
+才会真正生效。`launchctl print "gui/$(id -u)/com.colar.voice-cn-healthcheck"` 里
+`runs` > 0 且 `last exit code = 0` 才算真的在跑。
+（2026-08-29 实测：plist 装了整整一天从未被 bootstrap，这道防线全程没生效，见
 `INCIDENT-2026-08-hang-on-release.md`。）
+
+⚠️ **plist 里的脚本路径不能指向 `~/Desktop/`**——Desktop 是 macOS TCC 保护目录，launchd 没有
+完全磁盘访问权，每次触发都当场 `Operation not permitted`，而且**失败只进 `healthcheck.err.log`、
+不会有任何提示**。所以 plist 指向的是运行时副本 `~/.claude-voice-cn/healthcheck.sh`，
+改完 skill 目录里的源文件记得 `cp` 同步过去。（2026-08-29→09-01 实测：静默失败了三天。）
 
 **为什么起停逻辑单独一个 `voicectl.sh` 而不是塞进 start.sh**：start.sh 每次重装都会被 install.sh 重新生成。
 把逻辑放 skill 目录、start.sh 只当薄壳，改逻辑就不用重跑 install.sh；
@@ -262,6 +280,7 @@ export VOICE_MODEL=mlx-community/whisper-large-v3-turbo
 | 打出带 Option 的怪符号 | 出来 `˙´ƒ` 之类 | 松键后修饰键状态没落定。调大 `export VOICE_SETTLE_SECONDS=0.4` |
 | 连按两次热键（上一句还没转录完） | 提示「上一句还在转录，本次录音先排队…」，两句都会分别转录打字 | 设计如此，不是丢弃而是排队——两句都会出现，等一下就好 |
 | **松开热键后卡死**（终端停在「录音中…」不再有任何反应） | 进程活着但完全没反应，必须 `stop` 才能恢复 | 三次独立事故的病灶都是"pynput 监听线程上跑了一段可能阻塞的同步调用"，已修复；根因链路、每次的具体阻塞点、验证方法见 `INCIDENT-2026-08-hang-on-release.md` |
+| **CoreAudio 卡死**（底层音频服务死掉，不是 daemon 死掉） | `status` 照样报「已就绪」，但按热键必报「麦克风打开失败」；日志里连着出现「开流/关流/刷新设备表 超过 10s 未返回，判定卡死」 | `start.sh restart` 通常够；无效说明是系统音频服务本身卡了 → `sudo killall coreaudiod` 再 restart。**别信 status**——它只看 pidfile + ready 标记，探不到音频子系统死活，要信 `daemon.log` 最后几行。healthcheck 的故障触发会在 30 分钟内自动兜住 |
 | **转录结果重复**（同一句话被打两遍，措辞还略有不同） | 明明只按了一次热键 | 多半是前台和后台各起了一个实例，两个都在响应同一个全局热键——已修复单实例检测的盲区，细节同上见 `INCIDENT-2026-08-hang-on-release.md` |
 | **session 开着但按热键没反应**（自动拉起时代最高频） | 没有终端窗口可看，完全不知道它是没起来、还在下模型、还是哑了 | 三步定位：① `start.sh status` → 「未运行」= 自动拉起失败，看 `daemon.log.prev`；「尚未就绪」= 还在载模型，等；② 「已就绪」还没反应 → 是权限问题，下一行 |
 | **第一个 session 开在没授权的 App 里** | `status` 说「已就绪」，但按键毫无反应；在已授权终端里重开 session 也没用 | daemon 是单例，谁先开谁占坑，且它继承的是**拉起它的那个 App** 的权限。解：`start.sh stop`，然后在**已授权的**终端里 `start.sh start`（或从那儿开 session） |
