@@ -14,12 +14,30 @@ experts: [{role?, agentType?, lens}] —— 每个元素必须有 lens，且 rol
 其他选填：context（视为事实喂给每个专家）· evalMode（强制 Floor/Base/Optimal 三档）·
   verifyVotes（每条 claim 起手派几个 skeptic，默认 1；**收到硬反证的 claim 会自动追派到 3 票**
     再判杀，所以默认档不需要手动提档 —— 提档只是给"无人反对的 claim"也多花钱）· verifyLow（连 LOW 也验）·
-  depth / maxRounds（多轮深挖）· confidential（禁 web 通道）· budgetFloor · generic。`,
+  maxClaims（每个专家最多交几条 claim，默认 5，传 0 = 不限）——**这是控墙钟的主旋钮**：
+    每条 claim 派一个 skeptic，所以总 agent 数 ≈ 专家数 × maxClaims，不是专家数。
+    2026-09-02 实测：无上限时 6 专家跑出 75 agent / 45.8 分钟，其中 69 个是 skeptic。
+    要更快就调小它，别去砍专家数或关证据门控（那会砍掉这个 workflow 的全部价值）·
+  depth / maxRounds（多轮深挖）· confidential（禁 web 通道）· budgetFloor · generic。
+
+【返回值与收尾 —— 跑完必做，别把结果留在 chat 里】
+返回对象顶层带 star：一份 STAR 结构的呈现层（situation/task/action + headline/scorecard/
+confidence/mustFix/contested/shouldFix/keepAsIs/order/pattern），已按主题聚类、已把仓内黑话
+翻成人话，直接渲染即可，不要再自己从 perExpert 重新组织一遍。
+agreements/tensions/decision/killed 仍在 synthesis 里，是机制产物（证据门控 + 张力保留），
+star 与它们同源但重排；两者若矛盾以证据为准，别留两个版本的答案。
+
+收尾三步（Colar 2026-08-28 拍板的默认姿态，除非他说"只要 md"）：
+  1. 把 star 渲染成 md 落盘到该项目的 docs/（命名 <主题>-STAR-<YYYY-MM-DD>.md）；
+  2. bash ~/Desktop/colar-agents/scripts/compile_md.sh <那个 md 的绝对路径> --open
+     → 产出 .html + .pdf 并打开 pdf；
+  3. chat 里贴 md 全文（他要在对话里直接读到，不是只给路径）。
+为什么必须落盘：上一轮 panel 的对照表只活在 chat 里，session 一关就丢了，隔天要重跑整个 panel 重建。`,
   phases: [
     { title: 'Panel', detail: 'N 个专家并发，各自证据门控产出结构化意见' },
     { title: 'Verify', detail: '每个专家的关键 claim 被独立 skeptic 对抗验证（refute-by-default）' },
     { title: 'Critic', detail: '完整性批判 — 还缺什么视角/未验证 claim，决定是否再开一轮' },
-    { title: 'Synthesize', detail: '丢弃被驳倒的 claim，合成决策，保留 tension 不压平成共识' },
+    { title: 'Synthesize', detail: '丢弃被驳倒的 claim，合成决策，保留 tension 不压平成共识，并产出 STAR 呈现层' },
   ],
 }
 
@@ -54,6 +72,12 @@ const EVAL = !!(A && A.evalMode)
 const RAW_VOTES = Math.max(1, numArg(A && A.verifyVotes, 1))
 const VOTES = RAW_VOTES % 2 === 0 ? RAW_VOTES + 1 : RAW_VOTES
 const VERIFY_LEVELS = (A && A.verifyLow) ? ['HIGH', 'MEDIUM', 'LOW'] : ['HIGH', 'MEDIUM']
+// MAX_CLAIMS（2026-09-02 加）：墙钟正比于 claim 总数，不是专家数。实测一次 6 专家的 run
+// 跑出 75 个 agent / 45.8 分钟，其中 69 个是 skeptic（92%）—— 因为专家产出多少条 claim
+// 就派多少个 skeptic，而此前**没有任何上限**，平均每人吐 11.5 条。
+// 上限不砍机制只砍凑数：专家被迫自己排序、只交最关键的几条，边缘 claim 不再各吃一个
+// 完整 skeptic。设 0 表示不限（回到旧行为）。
+const MAX_CLAIMS = numArg(A && A.maxClaims, 5)
 const BUDGET_FLOOR = numArg(A && A.budgetFloor, 50000)
 const HARD_ROUND_CAP = 12 // runaway 兜底：即使预算充足也不超过这么多轮
 const DEPTH = !!(A && A.depth === true) // 一键深挖：无需手动传 budget 也触发多轮（critic 门控，DEPTH_ROUND_CAP 封顶）
@@ -162,10 +186,11 @@ const GROUND_RULES = `
 2. 反编造：无法验证的 claim 一律标 confidence="UNVERIFIED" 并说明缺什么证据；绝不 fabricate 数据/URL/"我跑了发现 X"。能力上做不到的（如无浏览器跑不了实测）直说做不到，不要假装。
 3. 反复读 prompt：不要把问题换个说法复述当结论。只报你独立查证后新增的信息。
 4. 反附和：你的任务是给独立专业判断，不是迎合提问者预期。证据指向反直觉结论时，照实报。
-5. 置信度别通胀 + 标验证方式：HIGH 只给"已实际查证、证据在手"的 claim；只推理没查证 = 最多 MEDIUM；没查证但合理 = LOW；查不了 = UNVERIFIED（历史审计发现 75% claim 被标 HIGH = 通胀，别再这样）。每条 claim 标 verifyMethod（${VERIFY_METHODS.join('｜')}）指明该怎么验。${CONFIDENTIAL_RULE}`
+5. 置信度别通胀 + 标验证方式：HIGH 只给"已实际查证、证据在手"的 claim；只推理没查证 = 最多 MEDIUM；没查证但合理 = LOW；查不了 = UNVERIFIED（历史审计发现 75% claim 被标 HIGH = 通胀，别再这样）。每条 claim 标 verifyMethod（${VERIFY_METHODS.join('｜')}）指明该怎么验。${MAX_CLAIMS ? `
+6. **claims 最多 ${MAX_CLAIMS} 条，这是硬上限。**每条都会被独立 skeptic 逐条对抗验证，所以多交等于让边缘判断挤掉关键判断的验证预算。自己先排序，只交最能改变决策的那几条；宁可 ${MAX_CLAIMS} 条全是硬的，也不要凑满。想说但够不上前 ${MAX_CLAIMS} 的，写进 recommendation 或 topRisks，那两处不派 skeptic。` : ''}${CONFIDENTIAL_RULE}`
 
 const EVAL_RULES = EVAL ? `
-6. 三档锚点（强制）：给 Floor（保守可达）/ Base（现实最可能）/ Optimal（最优情形）三档，不要只给 Optimal。` : ''
+7. 三档锚点（强制）：给 Floor（保守可达）/ Base（现实最可能）/ Optimal（最优情形）三档，不要只给 Optimal。` : ''
 
 // ───────────────────────── schema ─────────────────────────
 const EXPERT_SCHEMA = {
@@ -174,7 +199,10 @@ const EXPERT_SCHEMA = {
   properties: {
     summary: { type: 'string', description: '该视角下的一句话核心判断' },
     claims: {
-      type: 'array', description: '支撑判断的关键 claim，每条带证据',
+      // maxItems 与 GROUND_RULES 第 6 条是同一个约束的两层：prompt 讲清为什么，schema 兜住
+      // 不听话的模型。只靠 prompt 时实测会被无视（一次 run 平均每人吐 11.5 条）。
+      type: 'array', description: `支撑判断的关键 claim，每条带证据${MAX_CLAIMS ? `（最多 ${MAX_CLAIMS} 条，每条都会被独立 skeptic 验，别凑数）` : ''}`,
+      ...(MAX_CLAIMS ? { maxItems: MAX_CLAIMS } : {}),
       items: {
         type: 'object',
         required: ['claim', 'evidence', 'confidence', 'verifyMethod'],
@@ -250,10 +278,81 @@ const CRITIC_SCHEMA = {
   },
 }
 
+// ── STAR 呈现层（2026-08-28 加）────────────────────────────────────────────
+// 为什么是新增字段而不是替换 agreements/tensions/decision：那三个是**机制产物**，
+// 承载证据门控与"张力不得压平"的纪律，下游（runRecord 统计、killed 封闭清单覆盖）也在读它们。
+// 动它们等于把对抗验证的骨架和呈现格式绑死。star 是纯呈现层，从同一批 claim 二次组织，
+// 坏了只损失可读性、不损失结论。
+//
+// 病灶（Colar 2026-08-28）：panel 报告"读起来非常困难"。实测三个根因——
+//   ① 按专家分栏 ⟹ 同一个毛病散在 5 个地方，读者要自己做 join；
+//   ② 满篇仓内黑话（fail-closed / 锚点 / 契约门 / tripwire），术语密度高于信息密度；
+//   ③ 决策所需的"要不要现在动手"埋在论证里，得读完全文才能排序。
+// star 逐条对治：按主题聚类（不按专家）、强制翻译黑话、按动手紧迫度分桶。
+const STAR_SCHEMA = {
+  type: 'object',
+  required: ['situation', 'task', 'action', 'headline', 'confidence', 'mustFix', 'shouldFix', 'order'],
+  properties: {
+    situation: { type: 'string', description: 'S — 背景：为什么会有这次 panel。1-3 句，说清"在什么状态下开审的"' },
+    task: { type: 'array', items: { type: 'string' }, description: 'T — 这次要回答的问题，每条一句话，通常 2-4 条' },
+    action: { type: 'string', description: 'A — 怎么做的，1-2 句封顶。读者不关心过程，**不要**展开方法论' },
+    headline: { type: 'string', description: 'R 的第一行：整场结论压成一句话。要能单独拎出来当结论用' },
+    scorecard: {
+      type: 'array', description: '打分表 —— 仅当各专家给了 self_score 时填；非评分类 panel 给空数组',
+      items: {
+        type: 'object', required: ['dimension', 'score', 'note'],
+        properties: {
+          dimension: { type: 'string', description: '维度名，用人话（"前后端契约"而非 "contract"）' },
+          score: { type: 'string', description: '分数，如 "8.0"' },
+          delta: { type: 'string', description: '相比上次基线的方向，如 "↓ 从 7.5" / "—"（无基线时给 "—"）' },
+          note: { type: 'string', description: '一句话说明扣分/加分落在哪条轴上' },
+        },
+      },
+    },
+    confidence: { type: 'string', description: '一句话交代结论可信度：多少条确认 / 多少条存疑 / 多少条被推翻' },
+    mustFix: {
+      type: 'array', description: '必须现在动手的（**只能取 status=KEPT 的 claim**）',
+      items: {
+        type: 'object', required: ['problem', 'hurt', 'fix'],
+        properties: {
+          problem: { type: 'string', description: '问题是什么，人话，一句话讲完' },
+          hurt: { type: 'string', description: '**会怎么疼** —— 具体后果，不是抽象风险。有实测数字就带上' },
+          fix: { type: 'string', description: '怎么修，给到能直接动手的粒度' },
+        },
+      },
+    },
+    contested: {
+      type: 'array', description: '有争议但值得看的（**只能取 status=CONTESTED / UNVERIFIABLE 的 claim**）',
+      items: {
+        type: 'object', required: ['problem', 'whyDisputed', 'read'],
+        properties: {
+          problem: { type: 'string' },
+          whyDisputed: { type: 'string', description: '**必须分清争的是"事实成不成立"还是"有多严重"** —— 这两者对读者的意义完全不同' },
+          read: { type: 'string', description: '你的读法：综合看该不该动它，给个明确倾向' },
+        },
+      },
+    },
+    shouldFix: {
+      type: 'array', description: '该修但不急 —— **必须按问题主题聚类，严禁按专家分栏**（同一个毛病散在多处正是可读性的头号杀手）',
+      items: {
+        type: 'object', required: ['theme', 'items'],
+        properties: {
+          theme: { type: 'string', description: '主题名，说清这簇的共同形状，如"检查机制本身没被检查"' },
+          items: { type: 'array', items: { type: 'string' }, description: '该主题下各条，每条一行讲完' },
+        },
+      },
+    },
+    keepAsIs: { type: 'array', items: { type: 'string' }, description: '做得好、别动的地方。防"只报忧"导致的失真' },
+    order: { type: 'array', items: { type: 'string' }, description: 'R 的落地：建议动手顺序，带时间档（今天 / 本周 / 有空）' },
+    pattern: { type: 'string', description: '（可选）跨多条 finding 反复出现的同一形状，及其根因。没有就留空' },
+  },
+}
+
 const SYNTH_SCHEMA = {
   type: 'object',
-  required: ['agreements', 'tensions', 'decision', 'killed'],
+  required: ['agreements', 'tensions', 'decision', 'killed', 'star'],
   properties: {
+    star: STAR_SCHEMA,
     agreements: { type: 'array', items: { type: 'string' }, description: '多专家独立达成的共识（非互抄）' },
     tensions: {
       type: 'array', description: '真实分歧 —— 必须保留，不许压平成共识',
@@ -485,7 +584,7 @@ else if (GENERIC_OK) { SEED_EXPERTS = GENERIC_PANEL; castMode = 'generic-optin' 
 else throw new Error('expert-panel: 未传 experts 也未传 generic:true —— 拒绝静默用通用默认盘（72% 历史 run 掉这里的质量悬崖根因）。按题选人传 {question, experts:[{role|agentType, lens}]}（推荐 role，无注册表依赖）；确实只要通用盘传 {question, generic:true}。注：agentRoster/selector 路径已于 2026-08-08 移除（139 次留存 run 中 0 次真实调用），请直接传 experts。')
 
 // ───────────────────────── 主循环：多轮深挖（maxRounds / depth 驱动，budget 只当闸）─────────────────────────
-log(`expert-panel: seed ${SEED_EXPERTS.length} 专家｜evalMode=${EVAL}｜verifyVotes=${VOTES}｜verifyLow=${!!(A && A.verifyLow)}｜confidential=${CONFIDENTIAL}｜depth=${DEPTH}｜maxRounds=${MAX_ROUNDS}｜budget=${budget && budget.total ? Math.round(budget.total / 1000) + 'k' : 'none'}`)
+log(`expert-panel: seed ${SEED_EXPERTS.length} 专家｜maxClaims=${MAX_CLAIMS || '不限'}（预计 skeptic ≤ ${MAX_CLAIMS ? SEED_EXPERTS.length * MAX_CLAIMS : '无上限'}）｜evalMode=${EVAL}｜verifyVotes=${VOTES}｜verifyLow=${!!(A && A.verifyLow)}｜confidential=${CONFIDENTIAL}｜depth=${DEPTH}｜maxRounds=${MAX_ROUNDS}｜budget=${budget && budget.total ? Math.round(budget.total / 1000) + 'k' : 'none'}`)
 
 if (RAW_VOTES !== VOTES) log(`ℹ️ verifyVotes ${RAW_VOTES} → ${VOTES}（强制取奇：偶数票下 "HARD 过半" 退化成要求全票，比少一票更难杀假 claim 却贵一倍）`)
 if (castMode === 'generic-optin') log(`ℹ️ generic:true —— 按显式请求用了通用默认盘（${GENERIC_PANEL.map(e => e.agentType || e.role).join('/')}），非按题选人。`)
@@ -634,9 +733,24 @@ ${JSON.stringify(KILLED_LIST, null, 2)}
 3. 真实分歧必须放进 tensions 保留 —— 严禁为了"给个干净答案"把对立观点压平成虚假共识。
 4. 禁止附和提问者的既有立场。若 KEPT 证据整体指向提问者不想听的结论，明确说出来。
 5. agreements 只放"多个专家各自独立得出"的点，不是一个专家说、其他没反对。
-${VOTES === 1 ? `6. 本次 verifyVotes=1（基础档）：${escalatedClaims > 0
+6. star 字段是给人读的呈现层，与 agreements/tensions/decision 取自同一批 claim，但**重新组织**。它的纪律见下方专节，同样是硬约束。
+${VOTES === 1 ? `7. 本次 verifyVotes=1（基础档）：${escalatedClaims > 0
       ? `其中 ${escalatedClaims} 条 claim 因收到硬反证已被自动追派到 ${ESCALATE_QUORUM} 票复核（判 REFUTED 的都经过多数确认）；**其余** claim 仍只有一个未经审计的裁判做过检查。请在 decision 里区分这两类的可信度，不要一刀切打折。`
-      : `本轮没有任何 claim 收到硬反证，因此全部判决都出自单个未经审计的裁判。请在 decision 里对这一点给出显式折扣提示。`}` : ''}${EVAL ? '\n7. decision 给 Floor / Base / Optimal 三档。' : ''}${CONFIDENTIAL_NOTE}`,
+      : `本轮没有任何 claim 收到硬反证，因此全部判决都出自单个未经审计的裁判。请在 decision 里对这一点给出显式折扣提示。`}` : ''}${EVAL ? '\n8. decision 给 Floor / Base / Optimal 三档，star.order 与之对齐。' : ''}
+
+## STAR 呈现层纪律（star 字段的硬约束）
+
+读者是**懂技术但不熟这个仓**的决策者。他要的是"该不该动手、先动哪个"，不是论证过程。
+
+1. **语言**：禁止仓内黑话与英文术语裸奔。「fail-closed」写成"出错就直接拦住不放行"，「锚点孤本」写成"回滚用的存档只有一份"，「契约门」写成"上线前的自动检查"。术语是给同事看的，这份是给拍板的人看的。
+2. **shouldFix 必须按主题聚类，严禁按专家分栏。** 同一个毛病被 5 个专家从不同角度各报一次，读者要自己做 join —— 这是可读性的头号杀手。先看这批 finding 有哪些**共同形状**（如"检查机制本身没被检查"/"注释和代码对不上"/"一件事有多份实现"），再往里塞条目。
+3. **来源映射不许串桶**：mustFix 只取 KEPT；contested 只取 CONTESTED / UNVERIFIABLE；REFUTED 一条都不许出现在 star 的任何字段里。
+4. **contested 必须分清争的是"事实成不成立"还是"有多严重"。** 读者极易把"有争议"误读成"被驳倒了"。若两个 skeptic 都确认锚点属实、只是严重度投票低于自评，要明写"事实成立，争的是优先级"。
+5. **每条 mustFix 都要说"会怎么疼"**，且要具体。"有数据丢失风险"是废话；"磁盘上的旧快照 29MB 对现库 2.09GB，这笔债已经兑现了"才是能拍板的信息。
+6. **keepAsIs 不许省。** 只报忧的报告会让读者高估系统的糟糕程度，进而对整份结论打折。做得好的地方要点名。
+7. **order 给时间档**（今天 / 本周 / 有空），并优先安排"一个动作同时解决多个问题"的那些。
+8. **headline 要能单独拎出来当结论用**，不依赖上下文。
+9. star 与 decision 不得互相矛盾。两者结论不一致时，以证据为准并同时改，不要留下两个版本的答案。${CONFIDENTIAL_NOTE}`,
   { label: 'synthesize', phase: 'Synthesize', schema: SYNTH_SCHEMA }
 )
 
@@ -700,7 +814,26 @@ const runRecord = {
   killedSelfReported: ((synthesis && synthesis.killed) || []).length,
   tensionsCount: ((synthesis && synthesis.tensions) || []).length,
   agreementsCount: ((synthesis && synthesis.agreements) || []).length,
+  // STAR 呈现层的产出体检（2026-08-28）。schema 会强制字段存在，但**存在 ≠ 有用**：
+  // 空 mustFix 加空 order 一样能过校验，且长得像"没什么要修的"。记下桶计数，让空壳可测。
+  starBuckets: synthesis && synthesis.star ? {
+    mustFix: (synthesis.star.mustFix || []).length,
+    contested: (synthesis.star.contested || []).length,
+    shouldFixThemes: (synthesis.star.shouldFix || []).length,
+    shouldFixItems: (synthesis.star.shouldFix || []).reduce((n, t) => n + ((t && t.items) || []).length, 0),
+    keepAsIs: (synthesis.star.keepAsIs || []).length,
+    order: (synthesis.star.order || []).length,
+  } : null,
   tokensSpent: budget ? budget.spent() : null,
+}
+// star 空壳告警：受检 claim 不为零却什么都没进 mustFix/shouldFix，多半是合成偷懒或来源映射串桶，
+// 不是"真的没问题"。不 throw —— agreements/tensions/decision 仍完整可用，只损失呈现层。
+if (runRecord.starBuckets && _verified > 0
+    && runRecord.starBuckets.mustFix === 0 && runRecord.starBuckets.shouldFixItems === 0) {
+  log(`⚠️ star 呈现层疑似空壳：受检 claim ${_verified} 条，但 mustFix 与 shouldFix 双双为零 —— 请直接读 synthesis.decision，别信 star 的"没什么要修"。`)
+}
+if (synthesis && !synthesis.star) {
+  log(`⚠️ synthesize 未产出 star 字段（schema required 未生效）—— 呈现层缺失，回退读 decision/agreements/tensions。`)
 }
 log(`runRecord: castMode=${castMode}｜rounds=${round}｜verdict=${JSON.stringify(_vstat)}｜status=${JSON.stringify(_sstat)}｜confidence=${JSON.stringify(_cstat)}｜softened=${_softened}(struct=${_structured}/fallback=${_fallbackOnly})｜escalated=${escalatedClaims}(+${escalationVotes}票)｜killed=${runRecord.killedCount}｜contested=${(_contestedRatio * 100).toFixed(0)}%${_degraded ? ' ⚠️degraded' : ''}｜stop=${stopReason}`)
 if (runRecord.killedSelfReported !== runRecord.killedCount) {
@@ -719,5 +852,8 @@ return {
   // **没有它**，输出的 killed 是 synthesis agent 自由生成的，只受两条散文约束，而 SYNTH_SCHEMA
   // 对它仅约束 array of string，返回 [] 也能过校验。这正是本文件 :422 判定为无效的那一层。
   synthesis: synthesis ? { ...synthesis, killed: KILLED_LIST } : synthesis,
+  // 顶层再暴露一次 star（2026-08-28）：调用侧 99% 的用途是"拿去渲染成给人读的报告"，
+  // 让它不必先钻进 synthesis 再取。同一个对象引用，不是副本。
+  star: (synthesis && synthesis.star) || null,
   perExpert: digest,
 }
