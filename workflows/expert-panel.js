@@ -5,6 +5,10 @@ export const meta = {
 
 【args 契约 —— 调用方唯一读得到的就是这段，别去翻脚本注释】
 必填 {question}；选人必须显式传 experts 或 generic:true，否则抛错。
+**强烈建议同时传 decision**（"这次要拍的板是什么"，一句话）—— 它是全流程的漂移锚点：
+  焊进每个专家/skeptic/critic/synth 的 prompt，并驱动每条 claim 的 decisionImpact 分级，
+  而分级正是验证预算的排序键。不传则退化成"拿 question 整句当锚点"，分级质量会掉、
+  专家更容易滑进各自领域的细枝末节（2026-09-02 诊断出的漂移根因）。
 experts: [{role?, agentType?, lens}] —— 每个元素必须有 lens，且 role/agentType 至少有一个。
   · 推荐 {role, lens}：role 是自由命名的角色（如 "成本结构分析师"），走通用 subagent 靠 prompt 扮演，
     **无注册表依赖**，agent 退役也不会打崩，是 drift-free 的默认姿势。
@@ -23,6 +27,23 @@ experts: [{role?, agentType?, lens}] —— 每个元素必须有 lens，且 rol
     2026-09-02 实测：一次 resume 从 155 个 agent 涨到 210 且仍在涨。触闸后不再派新 skeptic，
     未验 claim 停在 NOTCHECKED 并计入 runRecord.gatedClaims —— **非零即表示结论有未验部分**，
     收尾会显式播报，不静默。⚠️ 墙钟上限做不了：脚本里 Date.now() 会抛错 ·
+  verifyTopK（每个专家最多验几条 claim，默认 3，传 0 = 不限）——**分级闸**：
+    按 decisionImpact（DECISIVE > SUPPORTING）× confidence 排序后只验前 K 条，
+    decisionImpact=CONTEXT 的一律不验。它与 maxClaims 正交：maxClaims 砍**数量**，
+    verifyTopK 砍**优先级错配**（此前唯一的验证门是 confidence，而 confidence 跟
+    "这条能不能改变决策"完全正交 ⟹ 一条边角事实和一条致命风险吃掉一样的预算）·
+  ⚠️ 未知参数会**直接抛错**（不是忽略）。收到"不认识的参数"报错通常意味着你在跑一份
+    **缓存的旧脚本** —— Workflow 按名字解析的定义是 session 级缓存的，已加载过它的 session
+    不会重新读盘（2026-09-02 实证：一次 run 白烧 46 分钟 / 5.23M token 才发现四个参数全被吞）。
+    开场 log 会打 \`expert-panel v<版本>\`；**看不到这一行就是在跑旧版**。
+  cheapVerify（默认 true）——首轮 skeptic 走 sonnet + effort:'low' 只做**分诊**；
+    例外：decisionImpact=DECISIVE 的 claim 不走分诊、首票直接上满配（分诊防得住假阳性、
+    防不住假阴性，而 2026-09-02 实测 claim 判杀率 24% / 自评 HIGH 占 96%，口子不小）。
+    它举手判 REFUTED 才追派 ESCALATE_QUORUM 张满配票复核，且**最终裁决只看满配票**
+    （分诊票不参与判杀，所以低配的误判权重为零，只影响"要不要花钱复核"）。
+    传 false 回到全满配。·
+  leanPrompts（默认 true）——超长的 question / context / evidence / 反证理由在下游
+    prompt 里按字数截断并显式标注；≤ 阈值的原样不动。传 false 关掉。·
   depth / maxRounds（多轮深挖）· confidential（禁 web 通道）· budgetFloor · generic。
 
 【返回值与收尾 —— 跑完必做，别把结果留在 chat 里】
@@ -39,9 +60,9 @@ star 与它们同源但重排；两者若矛盾以证据为准，别留两个版
   3. chat 里贴 md 全文（他要在对话里直接读到，不是只给路径）。
 为什么必须落盘：上一轮 panel 的对照表只活在 chat 里，session 一关就丢了，隔天要重跑整个 panel 重建。`,
   phases: [
-    { title: 'Panel', detail: 'N 个专家并发，各自证据门控产出结构化意见' },
-    { title: 'Verify', detail: '每个专家的关键 claim 被独立 skeptic 对抗验证（refute-by-default）' },
-    { title: 'Critic', detail: '完整性批判 — 还缺什么视角/未验证 claim，决定是否再开一轮' },
+    { title: 'Panel', detail: 'N 个专家并发，各自证据门控产出结构化意见 + 决策影响分级' },
+    { title: 'Verify', detail: '按决策影响排序取前 K 条：低配分诊票扫一遍，举手的才追派满配票对抗验证' },
+    { title: 'Critic', detail: '漂移校准 + 完整性批判 — 是否偏离决策锚点、还缺什么视角，决定是否再开一轮' },
     { title: 'Synthesize', detail: '丢弃被驳倒的 claim，合成决策，保留 tension 不压平成共识，并产出 STAR 呈现层' },
   ],
 }
@@ -58,6 +79,36 @@ let A = args
 if (typeof A === 'string') { try { A = JSON.parse(A) } catch (e) { A = { question: args } } }
 if (!A || typeof A !== 'object') A = {}
 
+// ── 版本标识 + 未知参数硬拒（2026-09-02 加，事故驱动）────────────────────────
+// 事故：2026-09-02 14:27 的一次 run 传了 verifyTopK / cheapVerify / leanPrompts /
+// maxVerifyAgents 四个参数，**四个全被静默吞掉**——因为那个 session 跑的是它自己
+// 缓存的旧脚本（快照 42369 字符、无 maxVerifyAgents，比当天 13:38 的 commit 还早，
+// 而 run 在近一小时后才启动）。结论：`Workflow({name:'expert-panel'})` 不是每次调用
+// 都读盘，已加载过它的 session 会一直用缓存那份；改文件只对**尚未加载过的 session** 生效。
+// 代价：调用方以为自己配了一次深思熟虑的 run，实际拿到旧默认行为，白烧 46 分钟 / 5.23M token。
+//
+// 两道护栏：
+// (1) SCRIPT_VERSION 进开场 log —— 旧脚本压根不打这一行，所以**看不到版本行**本身
+//     就是"你正在跑缓存的旧版"的信号，不需要额外机制去检测。
+// (2) 未知参数 throw 而不是 warn —— 权衡很清楚：throw 的代价是几秒后重来，
+//     warn 的代价是上面那 46 分钟。且"调用方的意图静默落空"正是本文件通篇在防的病，
+//     对自己的 args 契约不该例外。改契约时**必须同步 bump 版本号和这张表**。
+const SCRIPT_VERSION = '2026-09-02b'
+const KNOWN_ARGS = new Set([
+  'question', 'decision', 'experts', 'generic', 'context', 'evalMode',
+  'verifyVotes', 'verifyLow', 'verifyTopK', 'cheapVerify', 'leanPrompts',
+  'maxClaims', 'maxVerifyAgents', 'maxRounds', 'depth', 'confidential', 'budgetFloor',
+])
+const UNKNOWN_ARGS = Object.keys(A).filter(k => !KNOWN_ARGS.has(k))
+if (UNKNOWN_ARGS.length) {
+  throw new Error(
+    `expert-panel(v${SCRIPT_VERSION}): 收到本版本不认识的参数 ${JSON.stringify(UNKNOWN_ARGS)} —— 拒绝开 panel。\n` +
+    `这**通常不是拼写错误**，而是你在跑一份缓存的旧脚本：Workflow 按名字解析的定义是 session 级缓存的，\n` +
+    `已加载过 expert-panel 的 session 不会重新读盘。开一个新 session 再跑，或改用 scriptPath 显式指向文件。\n` +
+    `本版本认识的参数：${[...KNOWN_ARGS].join(' / ')}`
+  )
+}
+
 // fail-fast：question 缺失/空白直接抛错，绝不下发占位符给专家。
 // 静默降级是根因：2026-07-03 字符串投递丢 question 踩过一次；
 // 2026-07-06 调用方传了 object 但用了自造 key（无 question 字段）又白烧一整轮（4 专家 ×86k token）。
@@ -69,7 +120,37 @@ if (!Q) throw new Error('expert-panel: args.question 缺失或为空 — 拒绝�
 // 直接变 12 轮，从最保守跳到最激进。这与文件历史反复修的"静默降级"同根因，只是迁到了数值入参上。
 const numArg = (v, dflt) => (typeof v === 'number' && Number.isFinite(v) && v >= 0) ? v : dflt
 
-const CTX = (A && A.context) ? `\n\n## 已知上下文（视为事实，不要重新质疑其存在性）\n${A.context}` : ''
+// leanPrompts（2026-09-02 加）：同一份 Q + CTX 被原样拼进**每一个** agent 的 prompt。
+// 实测一次 run 有 75 个 agent ⟹ 长 context 是一笔 75 倍的乘法开销，且下游 skeptic 只需要
+// 语境来判"这条 claim 的适用范围"，并不需要全文。刻意做成**只在超长时才截**：短问题
+// （绝大多数）一个字不动，避免为了省 token 把小 run 的信息也切掉。
+const LEAN = !(A && A.leanPrompts === false)
+const clip = (s, n, what) => {
+  const t = String(s == null ? '' : s)
+  if (!LEAN || t.length <= n) return t
+  return `${t.slice(0, n)}\n…（${what}原文共 ${t.length} 字，此处截断至 ${n} 字。截断只影响下游转述，不影响判定——需要全文的信息应由你自己去查证，不要因为看不到全文就判 UNVERIFIABLE）`
+}
+
+const CTX_RAW = (A && A.context) ? String(A.context) : ''
+const CTX = CTX_RAW ? `\n\n## 已知上下文（视为事实，不要重新质疑其存在性）\n${CTX_RAW}` : ''
+// skeptic 侧的瘦身版：CTX 保留（它是"视为事实"的锚，砍了会让 skeptic 把"我无法独立证实
+// 这个上下文"当成反证——文件里已为此写过一条 ⚠️ 护栏）；Q 只保留够判定语境的开头。
+const CTX_LEAN = CTX_RAW ? `\n\n## 已知上下文（视为事实，不要重新质疑其存在性）\n${clip(CTX_RAW, 800, '上下文')}` : ''
+const Q_LEAN = clip(Q, 800, '原问题')
+
+// ── 决策锚点（2026-09-02 加）─────────────────────────────────────────────
+// 病灶：专家 prompt 此前只有 Q + lens，没有任何"这次要拍的板是什么"。lens 越具体，
+// 专家越容易滑进自己领域的细枝末节，产出一堆"有趣但改变不了决定"的 claim —— 而这些
+// claim 会各自吃掉一个完整 skeptic。所以漂移不只是可读性问题，它**直接就是账单**。
+// 锚点焊进全部四个通道（专家 / skeptic / critic / synth）：只堵一半是本文件反复踩的坑。
+const DECISION = (A && A.decision != null && String(A.decision).trim()) || null
+const ANCHOR = `
+## 决策锚点（每写一条之前先对一次，防跑题）
+本次要拍的板：${DECISION || '（调用方未显式声明 decision —— 以上面「问题」整句为准）'}
+判据：一条信息只有在【它成立与不成立会让上面这个板拍得不一样】时，才值得占用验证预算。
+"有趣但改变不了这个决定"的观察不要写进 claims —— 放进 recommendation 或 topRisks，
+那两处不派 skeptic、不占预算，照样会被读到。`
+
 const EVAL = !!(A && A.evalMode)
 // VOTES 强制取奇数（2026-08-08）：多数判据 `hard > vs.length/2` 在偶数票下退化成**要求全票**
 // —— VOTES=2 时需 2/2，比 VOTES=1 更难杀假 claim 却贵一倍，是纯粹的陷阱档位。
@@ -91,6 +172,21 @@ const MAX_CLAIMS = numArg(A && A.maxClaims, 5)
 // 触闸后不再派新 skeptic，未验的 claim 保持 NOTCHECKED 并计入 runRecord.gatedClaims ——
 // **绝不静默**：「没验」长得像「验过没问题」正是本文件反复在修的那类病。
 const MAX_VERIFY_AGENTS = numArg(A && A.maxVerifyAgents, 60)
+// VERIFY_TOP_K（2026-09-02 加）：**分级闸**。此前唯一的验证门是 confidence
+// （`VERIFY_LEVELS.includes(c.confidence)`），而 confidence 测的是"专家对这条有多确定"，
+// 跟"这条能不能改变决策"完全正交 —— 于是一条 HIGH 的边角事实和一条 HIGH 的致命风险
+// 吃掉一模一样的验证预算。maxClaims 是钝刀：它砍数量，砍不掉这个错配。
+// 新门：按 decisionImpact × confidence 排序，只验前 K 条，CONTEXT 档一条不验。
+// 被跳过的**不静默** —— 计入 triagedClaims，收尾播报，digest 里标 policy=TRIAGED。
+const VERIFY_TOP_K = numArg(A && A.verifyTopK, 3)
+// CHEAP_VERIFY（2026-09-02 加）：单价闸。实测 92% 的 agent 是 skeptic，而每个 skeptic
+// 都是满配（拿全量 Q+CTX、要实际 grep/web）。绝大多数 skeptic 的结论是 HOLDS ——
+// 用满配去确认"没问题"是最贵的一种确认。改成两档：
+//   分诊票（sonnet + effort:low）只回答"这条有没有明显问题"；
+//   它举手才追派 ESCALATE_QUORUM 张满配票，且**判杀只看满配票**（见 tallyVotes 的 tier 过滤）。
+// 所以低配的误判权重是零：它只能决定"要不要花钱复核"，不能决定"杀不杀"。
+const CHEAP_VERIFY = !(A && A.cheapVerify === false)
+const CHEAP_OPTS = CHEAP_VERIFY ? { model: 'sonnet', effort: 'low' } : {}
 const BUDGET_FLOOR = numArg(A && A.budgetFloor, 50000)
 const HARD_ROUND_CAP = 12 // runaway 兜底：即使预算充足也不超过这么多轮
 const DEPTH = !!(A && A.depth === true) // 一键深挖：无需手动传 budget 也触发多轮（critic 门控，DEPTH_ROUND_CAP 封顶）
@@ -177,6 +273,23 @@ const VERIFY_METHODS = CONFIDENTIAL
   : ['code', 'web', 'data', 'logic', 'none']
 const PROBE_CHANNELS = CONFIDENTIAL ? 'grep/ls/read' : 'grep/ls/read/web'
 
+// ── 探测通道显式授权（2026-09-02 加）─────────────────────────────────────
+// 病灶：verify prompt 一直明确给了 PROBE_CHANNELS，而**专家 prompt 一个字都没提**。
+// 于是"专家该不该去实际查证、能不能调 skill、web 工具怎么载入"全靠模型自己猜，
+// 结果是大量纯推理 claim 被自评成 HIGH（历史审计的置信度通胀，散文反通胀条款已被实证无效）。
+// 关键实现细节：WebSearch/WebFetch 在本 harness 里是 **deferred 工具**，schema 不在
+// context 里，直接调会 InputValidationError —— 必须先 ToolSearch 载入。不写明这一点
+// 等于给了通道却没给钥匙。
+const PROBE_KIT = `
+## 你的探测通道（用起来，别只靠推理）
+- 读码 / 搜索：Read · Grep · Glob · Bash（ls / grep / sed -n）—— 有仓库就先去仓库里看
+- 专项打法：若有与本题匹配的 Skill，直接用 Skill 工具调它，别自己重造流程${CONFIDENTIAL ? '' : `
+- 外部检索：WebSearch / WebFetch —— 它们是 deferred 工具，**先 \`ToolSearch "select:WebSearch,WebFetch"\` 载入 schema 再调**，直接调会报 InputValidationError`}
+- 其他工具（含 MCP）：\`ToolSearch\` 按关键词捞，同样先载 schema 再调
+
+纪律：**至少跑一次真实探测再下结论。** 全程只靠推理得出的 claim，confidence 上限是 MEDIUM——
+这不是谦虚，是 HIGH 这一档的定义（已实际查证、证据在手）。`
+
 const CONFIDENTIAL_RULE = CONFIDENTIAL ? `
 
 ## 保密硬约束（本次 run 置位 confidential:true，全程不解除）
@@ -200,10 +313,15 @@ const GROUND_RULES = `
 3. 反复读 prompt：不要把问题换个说法复述当结论。只报你独立查证后新增的信息。
 4. 反附和：你的任务是给独立专业判断，不是迎合提问者预期。证据指向反直觉结论时，照实报。
 5. 置信度别通胀 + 标验证方式：HIGH 只给"已实际查证、证据在手"的 claim；只推理没查证 = 最多 MEDIUM；没查证但合理 = LOW；查不了 = UNVERIFIED（历史审计发现 75% claim 被标 HIGH = 通胀，别再这样）。每条 claim 标 verifyMethod（${VERIFY_METHODS.join('｜')}）指明该怎么验。${MAX_CLAIMS ? `
-6. **claims 最多 ${MAX_CLAIMS} 条，这是硬上限。**每条都会被独立 skeptic 逐条对抗验证，所以多交等于让边缘判断挤掉关键判断的验证预算。自己先排序，只交最能改变决策的那几条；宁可 ${MAX_CLAIMS} 条全是硬的，也不要凑满。想说但够不上前 ${MAX_CLAIMS} 的，写进 recommendation 或 topRisks，那两处不派 skeptic。` : ''}${CONFIDENTIAL_RULE}`
+6. **claims 最多 ${MAX_CLAIMS} 条，这是硬上限。**每条都会被独立 skeptic 逐条对抗验证，所以多交等于让边缘判断挤掉关键判断的验证预算。自己先排序，只交最能改变决策的那几条；宁可 ${MAX_CLAIMS} 条全是硬的，也不要凑满。想说但够不上前 ${MAX_CLAIMS} 的，写进 recommendation 或 topRisks，那两处不派 skeptic。` : ''}
+7. **每条 claim 必须标 decisionImpact，对着上面的「决策锚点」判，不是对着你的专业兴趣判。**
+   · DECISIVE = 这条被推翻，上面那个板就得拍成另一个样子；
+   · SUPPORTING = 改变的是"怎么做 / 先做哪个"，不改变"做不做"；
+   · CONTEXT = 背景信息，任何一种结果都不改变任何决定。
+   ${VERIFY_TOP_K ? `验证预算按 DECISIVE → SUPPORTING 排序发放，每人只验前 ${VERIFY_TOP_K} 条，**CONTEXT 档一条都不验**。` : '**CONTEXT 档不派验证。**'}   注意 DECISIVE 换来的**不是优待而是更严的审查**：它会跳过快速分诊、直接由满配的对抗验证者逐条查证。所以虚标 DECISIVE 既挤掉你自己真正关键那条的名额，又把这条送去更容易被推翻的通道——诚实分级才是对你有利的。DECISIVE 按定义应当是少数（多数结论改变的是"怎么做"，不是"做不做"）。${CONFIDENTIAL_RULE}`
 
 const EVAL_RULES = EVAL ? `
-7. 三档锚点（强制）：给 Floor（保守可达）/ Base（现实最可能）/ Optimal（最优情形）三档，不要只给 Optimal。` : ''
+8. 三档锚点（强制）：给 Floor（保守可达）/ Base（现实最可能）/ Optimal（最优情形）三档，不要只给 Optimal。` : ''
 
 // ───────────────────────── schema ─────────────────────────
 const EXPERT_SCHEMA = {
@@ -218,11 +336,18 @@ const EXPERT_SCHEMA = {
       ...(MAX_CLAIMS ? { maxItems: MAX_CLAIMS } : {}),
       items: {
         type: 'object',
-        required: ['claim', 'evidence', 'confidence', 'verifyMethod'],
+        required: ['claim', 'evidence', 'confidence', 'verifyMethod', 'decisionImpact'],
         properties: {
           claim: { type: 'string' },
           evidence: { type: 'string', description: 'file:line / grep 输出 / URL / 数据；无则写缺什么' },
           confidence: { type: 'string', enum: ['HIGH', 'MEDIUM', 'LOW', 'UNVERIFIED'] },
+          // 进 required 是刻意的（与 evidenceRefs 的"刻意不进 required"相反）：
+          // 缺 decisionImpact 会让 JS 侧的分级排序整条失效并静默回退成"按 confidence 排"，
+          // 也就是回到本次要修的那个 bug。这里宁可让模型重试，也不接受静默降级。
+          decisionImpact: {
+            type: 'string', enum: ['DECISIVE', 'SUPPORTING', 'CONTEXT'],
+            description: '对着决策锚点判：DECISIVE=推翻这条，那个板就得拍成另一样｜SUPPORTING=只改变怎么做/先做哪个，不改变做不做｜CONTEXT=背景，任何结果都不改变任何决定（CONTEXT 不派验证）',
+          },
           verifyMethod: { type: 'string', enum: VERIFY_METHODS, description: '这条 claim 该用哪种方式验证：code=读码/grep｜web=外部检索｜data=跑数据/查询｜logic=纯推理｜none=不可验证。' },
         },
       },
@@ -270,11 +395,21 @@ const VERDICT_SCHEMA = {
 // 完整性批判：决定是否再开一轮 + 下一轮派谁。刻意只产 lens（视角描述），
 // 不强制 agentType —— critic 动态造的 agentType 大概率不在注册表里，会被静默吞成 null，
 // 所以下一轮统一用通用 subagent 靠 prompt 扮演（见 runRound 的 agentType 处理）。
+// 2026-09-02：加 drift/driftNote。此前 critic 的动作集只有 {complete, gaps, nextExperts}，
+// 也就是**它唯一能做的事是再加专家** —— 结构上是一台单向发散棘轮，永远不会把话题拽回来。
+// Colar 的原话："希望有一个锚定的论点，而不是让 subagent 过度发散。"
+// 现在给它第二个动作：判本轮是否已经在回答别的问题。判 SEVERE 直接收口，不再开新轮
+// （多开一轮 = 在已经跑偏的方向上再花 N 个专家 + N×K 个 skeptic，是最贵的一种错）。
 const CRITIC_SCHEMA = {
   type: 'object',
-  required: ['complete', 'gaps', 'nextExperts'],
+  required: ['complete', 'drift', 'driftNote', 'gaps', 'nextExperts'],
   properties: {
     complete: { type: 'boolean', description: '覆盖是否已足够 —— 再加视角无新增边际价值时为 true。宁缺毋滥，不要为多而多。' },
+    drift: {
+      type: 'string', enum: ['ON_TARGET', 'MILD', 'SEVERE'],
+      description: '本轮产出相对「决策锚点」的偏离度：ON_TARGET=都在回答那个板｜MILD=有部分跑题但主线还在｜SEVERE=主线已经在回答另一个问题了。判 SEVERE 会直接终止深挖——所以别为了显得严格而滥用，也别因为产出"看起来很专业"就放过跑题。',
+    },
+    driftNote: { type: 'string', description: 'drift 的依据：具体哪几条产出偏离了锚点、偏到哪去了。ON_TARGET 时写"无"。' },
     gaps: { type: 'array', items: { type: 'string' }, description: '还缺的：未覆盖的视角 / 未验证的关键 claim / 没跑的查证方式' },
     nextExperts: {
       type: 'array',
@@ -442,10 +577,27 @@ const effectiveStrength = v => {
 // claim 上（约 +82 次调用 vs 定向 +16）。为什么不允许单票杀：单票杀权是上一轮判定的误杀源。
 const ESCALATE_QUORUM = 3
 
+// 分级排序键（2026-09-02 加）。刻意做成 JS 侧的确定性排序而不是"让专家自己只交重要的" ——
+// 散文纪律对排序的约束力和它对置信度通胀的约束力是同一个量级（本文件 :168 已实证为近零）。
+// 位置要求同 effectiveStrength：必须在 runRound 之前，const 不 hoist。
+const IMPACT_RANK = { DECISIVE: 0, SUPPORTING: 1, CONTEXT: 2 }
+const CONF_RANK = { HIGH: 0, MEDIUM: 1, LOW: 2, UNVERIFIED: 3 }
+
+// 票分两档（2026-09-02 加，配合 cheapVerify）：
+//   tier='cheap' = 分诊票（sonnet + effort:low），职责只有"要不要花钱复核"；
+//   tier='full'  = 满配票，唯一有表决权的那种。
+// 聚合规则：这条 claim 上只要出现过满配票，就**只用满配票**裁决；一张都没有
+// （= 分诊没举手，从未触发追派）才回落到分诊票。
+// 为什么不让分诊票参与投票：低配模型的假阳性会直接变成误杀，而误杀是本文件历史上最贵的
+// 一类错误（真话被弱反证打掉，输出还长得像"验过了"）。给它提名权、不给表决权，
+// 低配误判的成本上限就锁死在"多花 ESCALATE_QUORUM 张满配票"，永远污染不了结论。
+// cheapVerify=false 时首轮票本身就是 full，本函数行为与 2026-09-02 之前完全一致。
 function tallyVotes(verdicts, claim) {
-  const vs = (verdicts || []).filter(v => v && v.claim === claim)
+  const all = (verdicts || []).filter(v => v && v.claim === claim)
+  const full = all.filter(v => v.tier !== 'cheap')
+  const vs = full.length ? full : all
   return {
-    vs,
+    vs, all, fullCount: full.length,
     hard: vs.filter(v => effectiveStrength(v) === 'HARD').length,
     weak: vs.filter(v => effectiveStrength(v) === 'WEAK').length,
   }
@@ -488,8 +640,8 @@ let escalatedClaims = 0
 // lensIdx=null 表示单票（不给切入 lens）；否则从三个 lens 里取，保证追派的票和第一票视角不同。
 const VERIFY_LENSES = ['事实正确性', '证据是否真支撑', '是否可复现/可验证']
 // 出口闸的计数在这里收口 —— 首轮验证与定向升级都经由 spawnVerify，卡一处即可全覆盖。
-let verifySpawned = 0, gatedClaims = 0
-const spawnVerify = (c, res, round, lensIdx) => {
+let verifySpawned = 0, gatedClaims = 0, cheapSpawned = 0, fullSpawned = 0, triagedClaims = 0
+const spawnVerify = (c, res, round, lensIdx, cheap) => {
   if (MAX_VERIFY_AGENTS && verifySpawned >= MAX_VERIFY_AGENTS) {
     gatedClaims++
     // 只在触闸那一刻播报一次，之后静默累加，收尾时再报总数（见 runRecord.gatedClaims）
@@ -497,29 +649,39 @@ const spawnVerify = (c, res, round, lensIdx) => {
     return Promise.resolve(null)
   }
   verifySpawned++
-  return _spawnVerify(c, res, round, lensIdx)
+  if (cheap) cheapSpawned++; else fullSpawned++
+  return _spawnVerify(c, res, round, lensIdx, cheap)
 }
-const _spawnVerify = (c, res, round, lensIdx) => agent(
+const _spawnVerify = (c, res, round, lensIdx, cheap) => agent(
   `对抗验证下面这条 claim —— 默认立场是「它是错的」，尽力找反证。只有反证不成立才判 HOLDS。
 ${lensIdx == null ? '' : `\n用这个 lens 切入：${VERIFY_LENSES[lensIdx % VERIFY_LENSES.length]}`}
-
+${cheap ? `
+## 你的角色是【分诊票】，不是终审
+你判 REFUTED+HARD **不会**直接杀掉这条 claim，只会触发 ${ESCALATE_QUORUM} 张满配复核票来重判。
+所以：看出可疑就大胆举手（代价只是多花几张复核票），但**绝不为了举手编造锚点** ——
+编出来的 ref 会在复核时被逐条核，代价远大于老实判 WEAK。查得动就查，查不动判 UNVERIFIABLE。
+` : ''}
 ## 原问题（仅用于判定这条 claim 的适用范围与语境，不要回答它）
-${Q}
-${CTX}
+${Q_LEAN}
+${CTX_LEAN}${DECISION ? `
+
+## 本次要拍的板（用来判这条 claim 切不切题，不要去回答它）
+${DECISION}` : ''}
 
 Claim: ${c.claim}
-专家给的证据: ${c.evidence}
+专家给的证据: ${clip(c.evidence, 600, '专家证据')}
 来源专家: ${res.exp.agentType}
 
-去实际查证（${PROBE_CHANNELS}）。判 REFUTED 必须附具体反证并标 refutationStrength=HARD；若只是推理/"查无确证"级别的怀疑 → 仍可判 REFUTED 但 refutationStrength=WEAK（只把 claim 降为"存疑保留"，不直接杀）。给不出任何反证判 UNVERIFIABLE、refutationStrength=NA。不许用直觉/猜测做 HARD 否决真 claim；不确定判 UNVERIFIABLE，不要默认放过。
+去实际查证（${PROBE_CHANNELS}）。${CONFIDENTIAL ? '' : 'WebSearch / WebFetch 是 deferred 工具，schema 不在 context 里 —— **先 `ToolSearch "select:WebSearch,WebFetch"` 载入再调**，直接调会报 InputValidationError（别因此以为"查不了"）。'}判 REFUTED 必须附具体反证并标 refutationStrength=HARD；若只是推理/"查无确证"级别的怀疑 → 仍可判 REFUTED 但 refutationStrength=WEAK（只把 claim 降为"存疑保留"，不直接杀）。给不出任何反证判 UNVERIFIABLE、refutationStrength=NA。不许用直觉/猜测做 HARD 否决真 claim；不确定判 UNVERIFIABLE，不要默认放过。
 
 ## evidenceRefs（判 HARD 时的硬要求）
 refutationStrength=HARD 必须同时填 evidenceRefs（至少 1 条），每条是你**实际查到**的锚点：
 {kind:"file_line", ref:"path/to/file.js:446", value:"那一行的原文"} ｜ {kind:"command", ref:"grep -n foo bar.js", value:"实际输出"} ｜ {kind:"data", ref:"指标名", value:"具体数字"}${CONFIDENTIAL ? '' : ' ｜ {kind:"url", ref:"https://…", value:"页面上的原话"}'}
 填不出就说明你没有硬证据 —— 改判 WEAK 或 UNVERIFIABLE，**不要编造锚点**（编造的 ref 会在复核时被抓出来，代价远大于判 WEAK）。JS 侧只校验字段形状：evidenceRefs 为空且 reason 里也无可核验锚点的"自称 HARD"，会被自动降为 WEAK。
 ⚠️ 上面「已知上下文」里的内容是本次 run 的既定事实，不要把"我无法独立证实这个上下文"当作反证。${CONFIDENTIAL ? '\n⚠️ 本次为保密 run：禁用 WebSearch/WebFetch，查不了就判 UNVERIFIABLE，不要走外部检索。' : ''}`,
-  { label: `verify:${res.exp.agentType}#r${round}`, phase: 'Verify', schema: VERDICT_SCHEMA }
-).then(v => ({ ...v, claim: c.claim })) // claim 放最后：防 skeptic 万一回带同名字段把锚点覆盖掉
+  { label: `verify${cheap ? '·分诊' : ''}:${res.exp.agentType}#r${round}`, phase: 'Verify', schema: VERDICT_SCHEMA, ...(cheap ? CHEAP_OPTS : {}) }
+  // claim / tier 放最后：防 skeptic 万一回带同名字段把锚点或票档覆盖掉
+).then(v => ({ ...v, claim: c.claim, tier: cheap ? 'cheap' : 'full' }))
 
 // ───────────────────────── 一轮 = Panel fan-out → Verify（pipeline，验证随产出即开）─────────────────────────
 // roundExperts: [{ agentType?, role?, lens }]，第一轮由调用方 cast，
@@ -541,12 +703,21 @@ ${Q}
 
 ## 你的视角
 ${exp.lens}
-${CTX}
+${CTX}${ANCHOR}
+${PROBE_KIT}
 ${GROUND_RULES}${EVAL_RULES}
 
 只输出你这个视角独立查证后的判断。`,
         opts
-      ).then(out => ({ exp: { agentType: roleName, lens: exp.lens }, out, i, round }))
+      ).then(out => {
+        // 可见性（2026-09-02 加）：此前 log() 只在阶段边界打，中途只能看到计数在涨、
+        // 看不到谁在争什么 —— Colar 的原话是"完全黑盒，做不到中途干预"。
+        // 每个专家一落地就播一行实质摘要，/wf-progress 与终端都能当场读到。
+        const cs = (out && out.claims) || []
+        const byImpact = cs.reduce((m, c) => (m[c.decisionImpact || '?'] = (m[c.decisionImpact || '?'] || 0) + 1, m), {})
+        log(`📋 ${roleName}#r${round}：${clip((out && out.summary) || '(无 summary)', 90, 'summary')} ｜ claim ${cs.length} 条 ${JSON.stringify(byImpact)}`)
+        return { exp: { agentType: roleName, lens: exp.lens }, out, i, round }
+      })
     },
 
     // stage 2：先跨轮去重（省 token），再对达到验证门槛的 claim 做对抗验证（该专家一产出就开始，不等别人）
@@ -566,11 +737,48 @@ ${GROUND_RULES}${EVAL_RULES}
         seenInThisExpert.add(k)
         return true
       })
-      const checkable = res.out.claims.filter(c => VERIFY_LEVELS.includes(c.confidence))
+      // ── 分级闸（2026-09-02 加）───────────────────────────────────────────
+      // 旧门只有 confidence，而 confidence 测的是"专家有多确定"，跟"这条能不能改变决策"
+      // 正交 ⟹ 一条 HIGH 的边角事实和一条 HIGH 的致命风险吃掉一样的验证预算，
+      // 这就是"在没意义的事情上争很久"的机制根因（不是模型爱吵，是预算被均摊了）。
+      // 新门叠两层：CONTEXT 一律不验；其余按 DECISIVE→SUPPORTING × confidence 排序取前 K。
+      // 被跳过的**绝不静默**：计入 triagedClaims、记进 res.triaged，digest 里标 policy。
+      // DECISIVE 破格入池（2026-09-02 冒烟测试逮到）：旧门 `VERIFY_LEVELS.includes(confidence)`
+      // 会把「能翻转决策、但专家自己没把握」的 claim（DECISIVE + LOW）挡在门外 ——
+      // 而那恰恰是最该花钱查的一类：它对结论的杠杆最大，且真伪未知。
+      // confidence 门原本的意思是"专家有多确定"，拿它当验证门就是在**优先验证已经确定的东西**。
+      // UNVERIFIED 仍不破格：合成纪律第 2 条本就禁止它进 decision，验了也用不上，纯浪费。
+      const eligible = res.out.claims.filter(c =>
+        c.decisionImpact !== 'CONTEXT' &&
+        (VERIFY_LEVELS.includes(c.confidence) ||
+         (c.decisionImpact === 'DECISIVE' && c.confidence !== 'UNVERIFIED')))
+      // 缺 decisionImpact（schema required 理论上兜住，但"理论上不该发生"正是要防的）
+      // 按 SUPPORTING 处理：不白拿最高优先级，也不被当 CONTEXT 直接丢掉。
+      const ranked = eligible.slice().sort((a, b) =>
+        (IMPACT_RANK[a.decisionImpact] ?? 1) - (IMPACT_RANK[b.decisionImpact] ?? 1) ||
+        (CONF_RANK[a.confidence] ?? 9) - (CONF_RANK[b.confidence] ?? 9))
+      const checkable = VERIFY_TOP_K ? ranked.slice(0, VERIFY_TOP_K) : ranked
+      const checkedKeys = new Set(checkable.map(c => norm(c.claim)))
+      const skipped = res.out.claims.length - checkable.length
+      if (skipped > 0) {
+        triagedClaims += skipped
+        // 两个不验的桶语义不同，分开报：`门外` = CONTEXT 档或没到 confidence 门槛；
+        // `降优先级` = 够格但排在第 K 名之后。前者是分级正常工作，后者才是预算真的不够。
+        const outOfGate = res.out.claims.length - eligible.length
+        log(`🎚 分级：${res.exp.agentType}#r${round} ${res.out.claims.length} 条 claim → 实验 ${checkable.length} 条（门外 ${outOfGate} 条 · 降优先级 ${eligible.length - checkable.length} 条）`)
+      }
+      // DECISIVE 不走分诊，首票就上满配（2026-09-02 加，由实测数据驱动）。
+      // 分诊设计防住的是**假阳性**（低配乱举手 → 只多花几张满配复核票，结论不受污染），
+      // 但它防不住**假阴性**：低配判 HOLDS 而这条其实是假 claim ⟹ 永不触发升级 ⟹ 静默 KEPT。
+      // 2026-09-02 那次 run 给了这个口子的基准错误率：25 条 claim 里 6 条被判杀（24%），
+      // 而专家自评 96% 是 HIGH —— 也就是"高置信且错"是常态而非例外，假阴性的机会面不小。
+      // 折中而非退让：只让 DECISIVE（推翻它就得改决定的那些）吃满配首票，SUPPORTING
+      // 仍走分诊。省钱的大头在后者（DECISIVE 按定义就该是少数），风险最大的那类拿到全额检方。
+      const cheapFor = (c) => CHEAP_VERIFY && c.decisionImpact !== 'DECISIVE'
       const verdicts = (await parallel(
         checkable.flatMap(c =>
-          // 每条 claim 派 VOTES 个 skeptic，多票时换不同 lens 增加视角多样性
-          Array.from({ length: VOTES }, (_, v) => () => spawnVerify(c, res, round, VOTES > 1 ? v : null))
+          // 每条 claim 派 VOTES 个 skeptic，多票时换不同 lens 增加视角多样性。
+          Array.from({ length: VOTES }, (_, v) => () => spawnVerify(c, res, round, VOTES > 1 ? v : null, cheapFor(c)))
         )
       )).filter(Boolean)
 
@@ -580,23 +788,31 @@ ${GROUND_RULES}${EVAL_RULES}
       // 更糟的是它静默 —— killedCount=0 长得像"本轮没有假 claim"，实际是枪被规则关掉了。
       // 定向而非全局提档：无人反对的 claim 不加钱（全局 VOTES=3 约 80% 开销花在那上面）。
       const needEscalate = checkable.filter(c => {
-        const { vs, hard } = tallyVotes(verdicts, c.claim)
-        return vs.length > 0 && vs.length < ESCALATE_QUORUM && hard > 0
+        const { fullCount, hard } = tallyVotes(verdicts, c.claim)
+        return fullCount < ESCALATE_QUORUM && hard > 0
       })
       if (needEscalate.length) {
         escalatedClaims += needEscalate.length
-        log(`⚖️ 定向升级：${res.exp.agentType}#r${round} 有 ${needEscalate.length} 条 claim 收到硬反证但票数不足，追派至 ${ESCALATE_QUORUM} 票复核`)
+        log(`⚖️ 定向升级：${res.exp.agentType}#r${round} 有 ${needEscalate.length} 条 claim 收到硬反证，追派至 ${ESCALATE_QUORUM} 张**满配**票复核`)
         const extra = (await parallel(
           needEscalate.flatMap(c => {
-            const have = tallyVotes(verdicts, c.claim).vs.length
-            escalationVotes += ESCALATE_QUORUM - have
-            // lensIdx 从 1 起：第一票（VOTES=1 时）无 lens，追派的两票走另外两个视角
-            return Array.from({ length: ESCALATE_QUORUM - have }, (_, k) => () => spawnVerify(c, res, round, k + 1))
+            // 缺口只按**满配票**算：分诊票没有表决权，所以它不能顶掉一张复核票。
+            // cheapVerify=false 时首轮票本身是 full，have=VOTES，缺口与 2026-09-02 前一致。
+            const have = tallyVotes(verdicts, c.claim).fullCount
+            const need = ESCALATE_QUORUM - have
+            escalationVotes += need
+            // lensIdx 从 1 起：第一票（VOTES=1 时）无 lens，追派的走另外两个视角
+            return Array.from({ length: need }, (_, k) => () => spawnVerify(c, res, round, k + 1, false))
           })
         )).filter(Boolean)
         verdicts.push(...extra)
+        // 判杀可见性：复核完当场把结论播出来，别等到 synthesize 之后才知道杀了什么。
+        for (const c of needEscalate) {
+          const st = majorityVerdict(verdicts, c.claim)
+          if (st === 'REFUTED') log(`☠️ 判杀：「${clip(c.claim, 70, 'claim')}」（${res.exp.agentType}#r${round}）`)
+        }
       }
-      return { ...res, verdicts }
+      return { ...res, verdicts, checkedKeys }
     }
   )
 }
@@ -609,12 +825,17 @@ else if (GENERIC_OK) { SEED_EXPERTS = GENERIC_PANEL; castMode = 'generic-optin' 
 else throw new Error('expert-panel: 未传 experts 也未传 generic:true —— 拒绝静默用通用默认盘（72% 历史 run 掉这里的质量悬崖根因）。按题选人传 {question, experts:[{role|agentType, lens}]}（推荐 role，无注册表依赖）；确实只要通用盘传 {question, generic:true}。注：agentRoster/selector 路径已于 2026-08-08 移除（139 次留存 run 中 0 次真实调用），请直接传 experts。')
 
 // ───────────────────────── 主循环：多轮深挖（maxRounds / depth 驱动，budget 只当闸）─────────────────────────
-log(`expert-panel: seed ${SEED_EXPERTS.length} 专家｜maxClaims=${MAX_CLAIMS || "不限"}（首轮 skeptic ≤ ${MAX_CLAIMS ? SEED_EXPERTS.length * MAX_CLAIMS : "无上限"}）｜maxVerifyAgents=${MAX_VERIFY_AGENTS || "不限"}（硬上限）｜evalMode=${EVAL}｜verifyVotes=${VOTES}｜verifyLow=${!!(A && A.verifyLow)}｜confidential=${CONFIDENTIAL}｜depth=${DEPTH}｜maxRounds=${MAX_ROUNDS}｜budget=${budget && budget.total ? Math.round(budget.total / 1000) + 'k' : 'none'}`)
+// 首轮 skeptic 的真实上限由**两个闸的较小者**决定：maxClaims（专家能交几条）
+// 与 verifyTopK（每人实际验几条）。此前这行只报 maxClaims，会把预期高估到实际的 ~1.7 倍。
+const _perExpertVerify = VERIFY_TOP_K ? (MAX_CLAIMS ? Math.min(MAX_CLAIMS, VERIFY_TOP_K) : VERIFY_TOP_K) : (MAX_CLAIMS || null)
+log(`expert-panel v${SCRIPT_VERSION}: seed ${SEED_EXPERTS.length} 专家｜maxClaims=${MAX_CLAIMS || "不限"}｜verifyTopK=${VERIFY_TOP_K || "不限"} ⟹ 首轮 skeptic ≤ ${_perExpertVerify ? SEED_EXPERTS.length * _perExpertVerify * VOTES : "无上限"}｜cheapVerify=${CHEAP_VERIFY}｜leanPrompts=${LEAN}｜maxVerifyAgents=${MAX_VERIFY_AGENTS || "不限"}（硬上限）｜evalMode=${EVAL}｜verifyVotes=${VOTES}｜verifyLow=${!!(A && A.verifyLow)}｜confidential=${CONFIDENTIAL}｜depth=${DEPTH}｜maxRounds=${MAX_ROUNDS}｜budget=${budget && budget.total ? Math.round(budget.total / 1000) + 'k' : 'none'}`)
+if (!DECISION) log(`ℹ️ 未传 decision —— 漂移锚点退化为"拿 question 整句当靶心"，claim 分级质量会掉。下次传 {decision:"这次要拍的板"} 能同时提升分级准确度与省钱效果。`)
 
 if (RAW_VOTES !== VOTES) log(`ℹ️ verifyVotes ${RAW_VOTES} → ${VOTES}（强制取奇：偶数票下 "HARD 过半" 退化成要求全票，比少一票更难杀假 claim 却贵一倍）`)
 if (castMode === 'generic-optin') log(`ℹ️ generic:true —— 按显式请求用了通用默认盘（${GENERIC_PANEL.map(e => e.agentType || e.role).join('/')}），非按题选人。`)
 
 const allResults = []
+const driftFlags = []   // critic 每轮的漂移判定（非 ON_TARGET 才记），进 runRecord + 喂给 synthesize
 let nextExperts = SEED_EXPERTS
 let round = 0
 // stopReason 在各 break 点就地赋值（2026-08-08 修）。旧实现在 synthesize **之后**才回推
@@ -649,10 +870,11 @@ while (round < MAX_ROUNDS && nextExperts && nextExperts.length) {
 
   // 完整性批判：本轮产出给全量细节，既往轮只给视角+结论（防 prompt 随轮数二次方增长）
   const critic = await agent(
-    `你是这个专家 panel 的完整性批判者。下面是专家产出。判断覆盖是否已足够。
+    `你是这个专家 panel 的完整性批判者 **兼漂移校准者**。下面是专家产出。
 
 ## 原问题
 ${Q}
+${ANCHOR}
 
 ## 本轮（第 ${round} 轮）专家产出
 ${JSON.stringify(roundResults.map(r => ({
@@ -665,13 +887,25 @@ ${JSON.stringify(roundResults.map(r => ({
 ${JSON.stringify(allResults.filter(r => r.round < round).map(r => ({ expert: r.exp.agentType, round: r.round, summary: r.out && r.out.summary })), null, 2)}
 
 ## 你的纪律
-1. 找真实 gap：哪些关键视角没人覆盖？哪些重大 claim 还没被验证？哪种查证方式（市场/技术/法务/成本/分发…）还没跑？
+0. **先判漂移，再判缺口。**对着上面的「决策锚点」看本轮产出：它们是在回答那个板，还是各自滑进了自己领域里更有趣但改变不了结论的话题？填 drift + driftNote。判 SEVERE 会直接终止深挖 —— 因为在已经跑偏的方向上再开一轮，等于再烧 N 个专家 + N×K 个验证 agent。
+1. 找真实 gap：哪些关键视角没人覆盖？哪些重大 claim 还没被验证？哪种查证方式（市场/技术/法务/成本/分发…）还没跑？**gap 必须是"缺了它就拍不了那个板"的缺口**，不是"这个领域还能再挖挖"。
 2. 宁缺毋滥：只有当新增专家能带来「目前完全没有的」边际信息时才 complete=false。重复已覆盖的视角 = 为多而多 = 禁止。
 3. 若覆盖已足够，complete=true，nextExperts 留空。
-4. nextExperts 里每个角色必须对应一个具体 gap，lens 写清这一轮要它专门挖什么。${CONFIDENTIAL_NOTE}`,
+4. nextExperts 里每个角色必须对应一个具体 gap，lens 写清这一轮要它专门挖什么，**且要能说清它挖到的东西会怎么影响那个板**。${CONFIDENTIAL_NOTE}`,
     { label: `critic#r${round}`, phase: 'Critic', schema: CRITIC_SCHEMA }
   )
 
+  if (critic && critic.drift && critic.drift !== 'ON_TARGET') {
+    driftFlags.push({ round, drift: critic.drift, note: critic.driftNote || '' })
+    log(`🧭 漂移校准（第 ${round} 轮）：${critic.drift} —— ${clip(critic.driftNote || '(critic 未给依据)', 200, 'driftNote')}`)
+  }
+  // SEVERE 直接收口：在已经跑偏的方向上再开一轮，是这个 workflow 里最贵的单一错误
+  // （一轮 = N 个专家 + N×verifyTopK 个 skeptic）。宁可少一轮，也不要在错的靶子上加钱。
+  if (critic && critic.drift === 'SEVERE') {
+    stopReason = 'drift-stop'
+    log(`🛑 漂移收口：本轮产出已偏离决策锚点（SEVERE），停止深挖，直接进合成。合成阶段会显式标注这一点。`)
+    break
+  }
   if (!critic || critic.complete || !Array.isArray(critic.nextExperts) || !critic.nextExperts.length) {
     stopReason = 'critic-complete'
     log(`完整性批判：覆盖已足够（complete=${critic && critic.complete}），收口于第 ${round} 轮`)
@@ -702,11 +936,22 @@ const digest = clean.map(r => {
     const status = majorityVerdict(vAll, c.claim)
     // 把 skeptic 的反证理由一并交给 synthesize。旧实现要求它引用**从未收到**的 reason，
     // 指令无法从所给数据满足时模型只能编 —— 这是文件里最直接的幻觉诱因。
-    const refuted = vAll.filter(v => v.claim === c.claim && v.verdict === 'REFUTED')
-    const rendered = refuted.map(v => `[${effectiveStrength(v)}] ${v.reason}`)
+    // 只渲染**有表决权的**反证（满配票）；分诊票的理由不进 synthesize —— 它没有杀伤力，
+    // 却会以"skeptic 说了什么"的形态影响合成的措辞，等于让低配票从后门拿回权重。
+    // 例外：这条 claim 上一张满配票都没有时（分诊判 HOLDS，从未追派），分诊票就是全部证据。
+    const votes = vAll.filter(v => v.claim === c.claim)
+    const scoring = votes.some(v => v.tier !== 'cheap') ? votes.filter(v => v.tier !== 'cheap') : votes
+    const refuted = scoring.filter(v => v.verdict === 'REFUTED')
+    const rendered = refuted.map(v => `[${effectiveStrength(v)}] ${clip(v.reason, 500, '反证理由')}`)
+    // NOTCHECKED 分两种，出口侧必须能区分（"没验"长得像"验过没问题"是本文件反复在修的病）：
+    //   TRIAGED = 按 decisionImpact/verifyTopK 主动不验，是设计意图；
+    //   GATED   = 送去验了但撞上 maxVerifyAgents 出口闸，是预算不够。
+    const wasSent = r.checkedKeys ? r.checkedKeys.has(norm(c.claim)) : true
+    const checkPolicy = status !== 'NOTCHECKED' ? 'VERIFIED' : (wasSent ? 'GATED' : 'TRIAGED')
     return {
-      claim: c.claim, confidence: c.confidence, evidence: c.evidence, verifyMethod: c.verifyMethod,
-      status,
+      claim: c.claim, confidence: c.confidence, evidence: clip(c.evidence, 500, '证据'),
+      verifyMethod: c.verifyMethod, decisionImpact: c.decisionImpact || null,
+      status, checkPolicy,
       // status=KEPT 却有反对票 = 孤票 WEAK（空口怀疑，未过 contest 门槛）。
       // 反证不丢，但降级为附注：不改 claim 的既定性，只允许当 tensions 的脚注。
       refutations: status === 'KEPT' ? [] : rendered,
@@ -732,14 +977,24 @@ const synthesis = await agent(
 
 ## 原问题
 ${Q}
-
+${ANCHOR}
+${driftFlags.length ? `\n## ⚠️ 漂移记录（critic 逐轮判定，非 ON_TARGET 才在此列出）\n${driftFlags.map(d => `- 第 ${d.round} 轮 [${d.drift}]：${d.note}`).join('\n')}\n跑偏轮次的产出仍在下面，但你必须**优先采信贴着决策锚点的那些**，并在 decision 里说明本次覆盖偏离过靶心。\n` : ''}
 ## 各专家产出
+每条 claim 附 decisionImpact（DECISIVE / SUPPORTING / CONTEXT，见决策锚点）、status 与 checkPolicy。
+decisionImpact 是排序依据：decision 与 star.order 必须让 DECISIVE 的结论排在 SUPPORTING 前面，CONTEXT 不进 decision。
+
+checkPolicy 三档（**这一档决定读者该给结论打多少折，不许略过**）：
+- VERIFIED = 真的派了 skeptic 去对抗验证，status 是验证结果
+- TRIAGED = 按 decisionImpact 分级**主动没验**（预算给了更关键的 claim）—— 它没被否定，但也没被确认
+- GATED = 送去验了但撞上验证预算上限，被迫没验 —— 同上，且说明本次预算不够
+TRIAGED / GATED 的 claim **一律不得当既定事实进 agreements/decision**；若确实关键，写进 tensions 并标"未验证"。
+
 每条 claim 附 status：
 - KEPT = 经验证站住（可能带 weakNotes，见下）
 - CONTESTED = 收到硬反证但未过多数门槛，或收到 ≥2 张软反对 —— 存疑保留、不得当既定事实
 - UNVERIFIABLE = 验证者查不实也证不伪（≠ 已确证），只能当待验证假设
 - REFUTED = 已被多数硬反证驳倒
-- NOTCHECKED = 未达验证门槛，没验
+- NOTCHECKED = 没验（具体是主动分级还是撞预算闸，看同条的 checkPolicy）
 refutations 字段是 skeptic 给出的反证原文（供你写 tensions 时引用，别自己编）。
 weakNotes 字段是**孤立的一张软反对票**（空口怀疑，无可核验锚点，未过存疑门槛）：它不改变该 claim 的既定性，
 你可以在相关 tensions 里把它当脚注提一句，但**不得**据此把一条 KEPT claim 降格、也不得因此拒绝把它写进 decision。
@@ -759,9 +1014,9 @@ ${JSON.stringify(KILLED_LIST, null, 2)}
 4. 禁止附和提问者的既有立场。若 KEPT 证据整体指向提问者不想听的结论，明确说出来。
 5. agreements 只放"多个专家各自独立得出"的点，不是一个专家说、其他没反对。
 6. star 字段是给人读的呈现层，与 agreements/tensions/decision 取自同一批 claim，但**重新组织**。它的纪律见下方专节，同样是硬约束。
-${VOTES === 1 ? `7. 本次 verifyVotes=1（基础档）：${escalatedClaims > 0
-      ? `其中 ${escalatedClaims} 条 claim 因收到硬反证已被自动追派到 ${ESCALATE_QUORUM} 票复核（判 REFUTED 的都经过多数确认）；**其余** claim 仍只有一个未经审计的裁判做过检查。请在 decision 里区分这两类的可信度，不要一刀切打折。`
-      : `本轮没有任何 claim 收到硬反证，因此全部判决都出自单个未经审计的裁判。请在 decision 里对这一点给出显式折扣提示。`}` : ''}${EVAL ? '\n8. decision 给 Floor / Base / Optimal 三档，star.order 与之对齐。' : ''}
+${VOTES === 1 ? `7. 本次 verifyVotes=1（基础档${CHEAP_VERIFY ? '，且首轮走低配分诊票' : ''}）：${escalatedClaims > 0
+      ? `其中 ${escalatedClaims} 条 claim 因收到硬反证已被追派到 ${ESCALATE_QUORUM} 张满配票复核（判 REFUTED 的都经过多数确认，可信度最高）；**其余** claim 只被${CHEAP_VERIFY ? '一张低配分诊票扫过' : '一个未经审计的裁判检查过'}。请在 decision 里区分这两类的可信度，不要一刀切打折。`
+      : `本轮没有任何 claim 收到硬反证，所以一次满配复核都没触发 —— 全部"站住"的判决都只出自${CHEAP_VERIFY ? '单张低配分诊票' : '单个未经审计的裁判'}。请在 decision 里对这一点给出显式折扣提示。`}` : ''}${EVAL ? '\n8. decision 给 Floor / Base / Optimal 三档，star.order 与之对齐。' : ''}
 
 ## STAR 呈现层纪律（star 字段的硬约束）
 
@@ -770,6 +1025,7 @@ ${VOTES === 1 ? `7. 本次 verifyVotes=1（基础档）：${escalatedClaims > 0
 1. **语言**：禁止仓内黑话与英文术语裸奔。「fail-closed」写成"出错就直接拦住不放行"，「锚点孤本」写成"回滚用的存档只有一份"，「契约门」写成"上线前的自动检查"。术语是给同事看的，这份是给拍板的人看的。
 2. **shouldFix 必须按主题聚类，严禁按专家分栏。** 同一个毛病被 5 个专家从不同角度各报一次，读者要自己做 join —— 这是可读性的头号杀手。先看这批 finding 有哪些**共同形状**（如"检查机制本身没被检查"/"注释和代码对不上"/"一件事有多份实现"），再往里塞条目。
 3. **来源映射不许串桶**：mustFix 只取 KEPT；contested 只取 CONTESTED / UNVERIFIABLE；REFUTED 一条都不许出现在 star 的任何字段里。
+3b. **checkPolicy=TRIAGED / GATED 且 decisionImpact=DECISIVE 的 claim 必须进 contested**，whyDisputed 写"没验证过——本次验证预算按优先级分配时排在名额外"，read 里给出你的倾向。它们既不是 KEPT 也不是 CONTESTED，若不显式安排就会从 star 里**整条消失** —— 而"能翻转决策却没人查过"恰恰是读者最需要知道的一类。宁可让 contested 长一点，也不能静默丢。
 4. **contested 必须分清争的是"事实成不成立"还是"有多严重"。** 读者极易把"有争议"误读成"被驳倒了"。若两个 skeptic 都确认锚点属实、只是严重度投票低于自评，要明写"事实成立，争的是优先级"。
 5. **每条 mustFix 都要说"会怎么疼"**，且要具体。"有数据丢失风险"是废话；"磁盘上的旧快照 29MB 对现库 2.09GB，这笔债已经兑现了"才是能拍板的信息。
 6. **keepAsIs 不许省。** 只报忧的报告会让读者高估系统的糟糕程度，进而对整份结论打折。做得好的地方要点名。
@@ -812,6 +1068,7 @@ const _contestedRatio = _verified ? (_sstat.CONTESTED + _sstat.UNVERIFIABLE) / _
 const _degraded = _contestedRatio > 0.45
 if (_degraded) log(`⚠️ degraded：受检 claim 中 ${(_contestedRatio * 100).toFixed(0)}% 落 CONTESTED/UNVERIFIABLE（基线 p90≈34%），本次结论的信息量偏低，读 decision 时按此打折。`)
 const runRecord = {
+  scriptVersion: SCRIPT_VERSION, // 落在产物里：事后回看一份 run record 就能确认它跑的是哪版
   question: Q,
   castMode,                    // explicit | generic-optin
   seedExperts: SEED_EXPERTS.length,
@@ -834,6 +1091,18 @@ const runRecord = {
   escalatedClaims,             // 因收到硬反证而被追派复核的 claim 数
   escalationVotes,             // 追派出去的额外 skeptic 票数（成本核算）
   verifySpawned,               // 实际派出的 skeptic 总数（出口闸的分子）
+  cheapSpawned,                // 其中低配分诊票 —— 这一项越高，本次省得越多
+  fullSpawned,                 // 其中满配票（首轮 cheapVerify=false 的票 + 全部追派复核票）
+  cheapVerify: CHEAP_VERIFY,
+  leanPrompts: LEAN,
+  verifyTopK: VERIFY_TOP_K || null,
+  // 按 decisionImpact/verifyTopK **主动**跳过验证的 claim 数（≠ gatedClaims 的"撞闸被迫跳过"）。
+  // 这是本次分级闸省下来的验证量；同时它也是必须打折的部分 —— 这些 claim 没被否定，
+  // 但也没被确认，digest 里标 checkPolicy=TRIAGED。
+  triagedClaims,
+  // critic 逐轮的漂移判定（只记非 ON_TARGET）。非空 = 本次讨论至少一度偏离过决策锚点。
+  driftFlags,
+  decisionAnchor: DECISION,    // null = 调用方没传，锚点退化成 question 整句
   maxVerifyAgents: MAX_VERIFY_AGENTS || null,
   // 触闸后被跳过的验证次数。**非零即意味着本次结论有未经验证的 claim** ——
   // 它们停在 NOTCHECKED，既没被确认也没被驳倒，读结论时必须按此打折。
@@ -871,7 +1140,18 @@ if (runRecord.starBuckets && _verified > 0
 if (synthesis && !synthesis.star) {
   log(`⚠️ synthesize 未产出 star 字段（schema required 未生效）—— 呈现层缺失，回退读 decision/agreements/tensions。`)
 }
-log(`runRecord: castMode=${castMode}｜rounds=${round}｜verdict=${JSON.stringify(_vstat)}｜status=${JSON.stringify(_sstat)}｜confidence=${JSON.stringify(_cstat)}｜softened=${_softened}(struct=${_structured}/fallback=${_fallbackOnly})｜escalated=${escalatedClaims}(+${escalationVotes}票)｜killed=${runRecord.killedCount}｜contested=${(_contestedRatio * 100).toFixed(0)}%${_degraded ? ' ⚠️degraded' : ''}｜stop=${stopReason}`)
+// 分级闸的账单：主动跳过多少条、省了多少个 skeptic。**必须播报** —— 省钱与"结论有未验部分"
+// 是同一件事的两面，只报省钱不报未验就是静默降级，那正是本文件通篇在防的病。
+if (triagedClaims > 0) {
+  log(`🎚 分级闸：主动跳过 ${triagedClaims} 条 claim 的验证（省下同等数量的 skeptic）。它们在 digest 里标 checkPolicy=TRIAGED —— 没被否定，也**没被确认**，读 decision 时按此打折。放宽办法：verifyTopK 调大或传 0 放开名额上限；confidence=LOW 的非 DECISIVE claim 要验得传 verifyLow:true。注意 decisionImpact=CONTEXT 一档**不可放开**，它按定义就是"任何结果都不改变任何决定"。`)
+}
+if (CHEAP_VERIFY) {
+  log(`💰 双档验证：分诊票 ${cheapSpawned} 张（sonnet/low，只提名不表决）+ 满配复核票 ${fullSpawned} 张。满配占比 ${verifySpawned ? Math.round(fullSpawned / verifySpawned * 100) : 0}%。`)
+}
+if (driftFlags.length) {
+  log(`🧭 漂移记录：${driftFlags.map(d => `r${d.round}=${d.drift}`).join(' ')} —— 本次讨论至少一度偏离过决策锚点，synthesize 已收到这份记录并被要求在 decision 里说明。`)
+}
+log(`runRecord: castMode=${castMode}｜rounds=${round}｜verdict=${JSON.stringify(_vstat)}｜status=${JSON.stringify(_sstat)}｜confidence=${JSON.stringify(_cstat)}｜softened=${_softened}(struct=${_structured}/fallback=${_fallbackOnly})｜escalated=${escalatedClaims}(+${escalationVotes}满配票)｜skeptic=${verifySpawned}(cheap ${cheapSpawned}/full ${fullSpawned})｜triaged=${triagedClaims}｜killed=${runRecord.killedCount}｜contested=${(_contestedRatio * 100).toFixed(0)}%${_degraded ? ' ⚠️degraded' : ''}｜stop=${stopReason}`)
 if (runRecord.killedSelfReported !== runRecord.killedCount) {
   log(`ℹ️ synthesize 自述 killed ${runRecord.killedSelfReported} 条 ≠ 封闭清单 ${runRecord.killedCount} 条 —— 已由 JS 覆盖为封闭清单（散文约束再次被实证不可靠）`)
 }
