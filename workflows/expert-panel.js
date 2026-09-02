@@ -547,21 +547,29 @@ const EVIDENCE_MARK = new RegExp([
 ].join('|'), 'i')
 
 // evidenceRefs 元素级校验：只看形状，不判断内容真假（那是 skeptic 的职责，JS 判不了）。
-// 哪些 kind 算硬锚点**只由下面的 switch 表达**——曾经还有一个 HARD_REF_KINDS 集合做前置过滤，
+// 哪些 kind 算硬锚点**只由下面这张表表达**——曾经还有一个 HARD_REF_KINDS 集合做前置过滤，
 // 两处重复表达同一规则，结果是往集合里加 kind 根本不改变行为（突变测试逮到的等价变异体）。
-// 单一判据即单一真相源：quote 没有 case 分支，所以引文不单独构成硬锚点——不指明出处无法复核。
+// 2026-09-02 从 switch 改成查表，单一真相源不变，但多了一件 switch 做不到的事：
+// **"这个 kind 我认不认识" 与 "它算不算硬锚点" 现在可以分开回答**。
+// switch 的 default 把两者压成同一个 false，于是新加一种 kind 会被静默当成"不算硬锚点"，
+// 长得和"认识它、判定它不够硬"一模一样——正是 2026-09-02 生态体检判定的全仓根因形状
+// （判据是已知模式的白名单，新维度进来就静默失明，失效方向永远是绿）。
+// quote 显式在表里且恒为 false：引文**不**单独构成硬锚点（不指明出处无法复核），
+// 但它是**已知**的 kind，不该被计进"未知取值"的账。
+const REF_KIND_CHECK = {
+  file_line: (ref) => /\d/.test(ref) && /[./\\]/.test(ref),        // 要有位置感：路径味 + 数字
+  command: (ref) => /\S\s+\S/.test(ref),                            // 命令必须带参数（"我没 grep 过"不算）
+  url: (ref) => /^https?:\/\//i.test(ref),
+  data: (ref, val) => /\d/.test(ref) || /\d/.test(val),             // 指标必须落到某个数
+  quote: () => false,                                               // 已知但恒不算硬锚点，见上
+}
+const isKnownRefKind = k => Object.prototype.hasOwnProperty.call(REF_KIND_CHECK, k)
 function isUsableRef(r) {
   if (!r || typeof r !== 'object') return false
   const ref = String(r.ref || '').trim()
   if (ref.length < 3) return false
-  const val = String(r.value || '')
-  switch (r.kind) {
-    case 'file_line': return /\d/.test(ref) && /[./\\]/.test(ref)   // 要有位置感：路径味 + 数字
-    case 'command': return /\S\s+\S/.test(ref)                       // 命令必须带参数（"我没 grep 过"不算）
-    case 'url': return /^https?:\/\//i.test(ref)
-    case 'data': return /\d/.test(ref) || /\d/.test(val)             // 指标必须落到某个数
-    default: return false
-  }
+  const check = REF_KIND_CHECK[r.kind]
+  return check ? check(ref, String(r.value || '')) : false
 }
 
 const effectiveStrength = v => {
@@ -1061,6 +1069,32 @@ for (const r of clean) {
 // 才是出口质量 —— 想知道它得去解析 transcript 里的 digest JSON，属可做但费劲的 ergonomics 缺口。
 const _sstat = { KEPT: 0, CONTESTED: 0, UNVERIFIABLE: 0, REFUTED: 0, NOTCHECKED: 0 }
 for (const d of digest) for (const c of d.claims) if (c.status in _sstat) _sstat[c.status]++
+
+// ── 白名单判据的覆盖分母（2026-09-02 加）─────────────────────────────────
+// 2026-09-02 的生态体检 panel 判定全仓根因是：每道门的判据都是一份「已知模式的白名单」，
+// 每长出一个新维度门就静默失明，且失效方向永远是绿 —— 而根因不是任何一道门写得差，
+// 是**没有任何一层报告自己的覆盖分母**。本文件里就有三处同形状的白名单：
+//   IMPACT_RANK / CONF_RANK 的 `??` 兜底，以及 REF_KIND_CHECK 的查不到即 false。
+// 把它们做成穷举是做不到的（新取值总会来），能做的是让兜底**开口说话**：
+// 命中不是错误，但它意味着这一轮有一部分判定走的是默认路径而非真实判据。
+// 单次遍历、单一真相源（`in` / isKnownRefKind 都直接问那张表，不另抄一份清单）。
+let _unknownImpact = 0, _unknownConf = 0, _unknownRefKind = 0
+for (const d of digest) {
+  for (const c of d.claims) {
+    if (!(c.decisionImpact in IMPACT_RANK)) _unknownImpact++
+    if (!(c.confidence in CONF_RANK)) _unknownConf++
+  }
+}
+for (const r of clean) {
+  for (const v of (r.verdicts || [])) {
+    for (const ref of (Array.isArray(v.evidenceRefs) ? v.evidenceRefs : [])) {
+      if (ref && typeof ref === 'object' && !isKnownRefKind(ref.kind)) _unknownRefKind++
+    }
+  }
+}
+if (_unknownImpact || _unknownConf || _unknownRefKind) {
+  log(`🕳 白名单盲区：decisionImpact 未知 ${_unknownImpact} 条（按 SUPPORTING 排序）｜confidence 未知 ${_unknownConf} 条（排在末位）｜evidenceRefs.kind 未知 ${_unknownRefKind} 个（一律不算硬锚点）。schema enum 本该拦住这些 —— 非零说明有取值绕过了 enum，或表该扩了。这些判定走的是默认路径，不是真实判据。`)
+}
 const _verified = _sstat.KEPT + _sstat.CONTESTED + _sstat.UNVERIFIABLE + _sstat.REFUTED
 // 退化告警：受检 claim 里过半沉淀成"存疑/查不实"时，输出正在滑向"什么都存疑"的无信息态。
 // 阈值 0.45 取自历史基线（逐 run REFUTED 率中位 0.12、p90 0.34，74 个 run 无一 ≥0.50）。
@@ -1102,6 +1136,10 @@ const runRecord = {
   triagedClaims,
   // critic 逐轮的漂移判定（只记非 ON_TARGET）。非空 = 本次讨论至少一度偏离过决策锚点。
   driftFlags,
+  // 白名单判据的盲区计数。非零 = 本轮有一部分判定走的是默认路径而非真实判据
+  // （decisionImpact 按 SUPPORTING 排、confidence 排末位、未知 refKind 一律不算硬锚点）。
+  // 它们本该被 schema enum 拦住，所以非零同时也是"enum 没起作用"的信号。
+  whitelistBlindSpots: { decisionImpact: _unknownImpact, confidence: _unknownConf, evidenceRefKind: _unknownRefKind },
   decisionAnchor: DECISION,    // null = 调用方没传，锚点退化成 question 整句
   maxVerifyAgents: MAX_VERIFY_AGENTS || null,
   // 触闸后被跳过的验证次数。**非零即意味着本次结论有未经验证的 claim** ——
