@@ -119,6 +119,13 @@ def main():
         phrases = sorted(set(m for m in re.findall(r"\*\*([^*]{4,40})\*\*", soul_text)))
         overlap = []
         for f in by_prefix["feedback"]:
+            # SOUL 已经用文件名指过来的，关系是「细化」且动作已完成（4-class 表：写 + 加 pointer），
+            # 不是候选重复 —— 而一个细化类 memory **本来就该**以它所细化的 SOUL axiom 命名，
+            # 于是旧判据恰好在**正确状态**上永久报警。实例：SOUL 里某一条 axiom
+            # 写着「详见 feedback_<topic>.md」，却被逐 session 报成候选重复。
+            # 检查仍对「frontmatter 抄了 SOUL 短语、但 SOUL 没指回来」的真冗余生效。
+            if f in soul_text:
+                continue
             name, desc = frontmatter_name_desc(f)
             meta = (name + "\n" + desc).lower()
             if not meta.strip():
