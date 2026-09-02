@@ -14,10 +14,15 @@ experts: [{role?, agentType?, lens}] —— 每个元素必须有 lens，且 rol
 其他选填：context（视为事实喂给每个专家）· evalMode（强制 Floor/Base/Optimal 三档）·
   verifyVotes（每条 claim 起手派几个 skeptic，默认 1；**收到硬反证的 claim 会自动追派到 3 票**
     再判杀，所以默认档不需要手动提档 —— 提档只是给"无人反对的 claim"也多花钱）· verifyLow（连 LOW 也验）·
-  maxClaims（每个专家最多交几条 claim，默认 5，传 0 = 不限）——**这是控墙钟的主旋钮**：
-    每条 claim 派一个 skeptic，所以总 agent 数 ≈ 专家数 × maxClaims，不是专家数。
+  maxClaims（每个专家最多交几条 claim，默认 5，传 0 = 不限）——**进料闸**：
+    每条 claim 派一个 skeptic，所以首轮 agent 数 ≈ 专家数 × maxClaims，不是专家数。
     2026-09-02 实测：无上限时 6 专家跑出 75 agent / 45.8 分钟，其中 69 个是 skeptic。
     要更快就调小它，别去砍专家数或关证据门控（那会砍掉这个 workflow 的全部价值）·
+  maxVerifyAgents（skeptic 总数上限，默认 60，传 0 = 不限）——**出口闸，防跑飞**：
+    maxClaims 管不住 escalation（收到硬反证的 claim 自动追派到 3 票，发生在入口之后）。
+    2026-09-02 实测：一次 resume 从 155 个 agent 涨到 210 且仍在涨。触闸后不再派新 skeptic，
+    未验 claim 停在 NOTCHECKED 并计入 runRecord.gatedClaims —— **非零即表示结论有未验部分**，
+    收尾会显式播报，不静默。⚠️ 墙钟上限做不了：脚本里 Date.now() 会抛错 ·
   depth / maxRounds（多轮深挖）· confidential（禁 web 通道）· budgetFloor · generic。
 
 【返回值与收尾 —— 跑完必做，别把结果留在 chat 里】
@@ -78,6 +83,14 @@ const VERIFY_LEVELS = (A && A.verifyLow) ? ['HIGH', 'MEDIUM', 'LOW'] : ['HIGH', 
 // 上限不砍机制只砍凑数：专家被迫自己排序、只交最关键的几条，边缘 claim 不再各吃一个
 // 完整 skeptic。设 0 表示不限（回到旧行为）。
 const MAX_CLAIMS = numArg(A && A.maxClaims, 5)
+// MAX_VERIFY_AGENTS（2026-09-02 加）：出口闸。maxClaims 管进料，管不住 escalation ——
+// 收到硬反证的 claim 会自动追派到 ESCALATE_QUORUM 票，这一步发生在入口之后，
+// 所以单靠 maxClaims 无法给总规模封顶。2026-09-02 实测：一次 resume 从 155 个 agent
+// 一路涨到 210 且仍在涨，而脚本此前只有轮数上限（HARD_ROUND_CAP），没有 agent 数上限。
+// ⚠️ 墙钟做不了：脚本里 Date.now() 会抛错（为了 resume 可复现），只能按计数封顶。
+// 触闸后不再派新 skeptic，未验的 claim 保持 NOTCHECKED 并计入 runRecord.gatedClaims ——
+// **绝不静默**：「没验」长得像「验过没问题」正是本文件反复在修的那类病。
+const MAX_VERIFY_AGENTS = numArg(A && A.maxVerifyAgents, 60)
 const BUDGET_FLOOR = numArg(A && A.budgetFloor, 50000)
 const HARD_ROUND_CAP = 12 // runaway 兜底：即使预算充足也不超过这么多轮
 const DEPTH = !!(A && A.depth === true) // 一键深挖：无需手动传 budget 也触发多轮（critic 门控，DEPTH_ROUND_CAP 封顶）
@@ -474,7 +487,19 @@ let escalatedClaims = 0
 // verify prompt 提取成模块级函数：定向升级要用同一份 prompt 追派，内联在 stage2 里无法复用。
 // lensIdx=null 表示单票（不给切入 lens）；否则从三个 lens 里取，保证追派的票和第一票视角不同。
 const VERIFY_LENSES = ['事实正确性', '证据是否真支撑', '是否可复现/可验证']
-const spawnVerify = (c, res, round, lensIdx) => agent(
+// 出口闸的计数在这里收口 —— 首轮验证与定向升级都经由 spawnVerify，卡一处即可全覆盖。
+let verifySpawned = 0, gatedClaims = 0
+const spawnVerify = (c, res, round, lensIdx) => {
+  if (MAX_VERIFY_AGENTS && verifySpawned >= MAX_VERIFY_AGENTS) {
+    gatedClaims++
+    // 只在触闸那一刻播报一次，之后静默累加，收尾时再报总数（见 runRecord.gatedClaims）
+    if (gatedClaims === 1) log(`⛔ 出口闸触发：已派出 ${verifySpawned} 个 skeptic（上限 maxVerifyAgents=${MAX_VERIFY_AGENTS}），此后不再派新的。剩余 claim 保持 NOTCHECKED，收尾会报总数。要放开就调大 maxVerifyAgents。`)
+    return Promise.resolve(null)
+  }
+  verifySpawned++
+  return _spawnVerify(c, res, round, lensIdx)
+}
+const _spawnVerify = (c, res, round, lensIdx) => agent(
   `对抗验证下面这条 claim —— 默认立场是「它是错的」，尽力找反证。只有反证不成立才判 HOLDS。
 ${lensIdx == null ? '' : `\n用这个 lens 切入：${VERIFY_LENSES[lensIdx % VERIFY_LENSES.length]}`}
 
@@ -584,7 +609,7 @@ else if (GENERIC_OK) { SEED_EXPERTS = GENERIC_PANEL; castMode = 'generic-optin' 
 else throw new Error('expert-panel: 未传 experts 也未传 generic:true —— 拒绝静默用通用默认盘（72% 历史 run 掉这里的质量悬崖根因）。按题选人传 {question, experts:[{role|agentType, lens}]}（推荐 role，无注册表依赖）；确实只要通用盘传 {question, generic:true}。注：agentRoster/selector 路径已于 2026-08-08 移除（139 次留存 run 中 0 次真实调用），请直接传 experts。')
 
 // ───────────────────────── 主循环：多轮深挖（maxRounds / depth 驱动，budget 只当闸）─────────────────────────
-log(`expert-panel: seed ${SEED_EXPERTS.length} 专家｜maxClaims=${MAX_CLAIMS || '不限'}（预计 skeptic ≤ ${MAX_CLAIMS ? SEED_EXPERTS.length * MAX_CLAIMS : '无上限'}）｜evalMode=${EVAL}｜verifyVotes=${VOTES}｜verifyLow=${!!(A && A.verifyLow)}｜confidential=${CONFIDENTIAL}｜depth=${DEPTH}｜maxRounds=${MAX_ROUNDS}｜budget=${budget && budget.total ? Math.round(budget.total / 1000) + 'k' : 'none'}`)
+log(`expert-panel: seed ${SEED_EXPERTS.length} 专家｜maxClaims=${MAX_CLAIMS || "不限"}（首轮 skeptic ≤ ${MAX_CLAIMS ? SEED_EXPERTS.length * MAX_CLAIMS : "无上限"}）｜maxVerifyAgents=${MAX_VERIFY_AGENTS || "不限"}（硬上限）｜evalMode=${EVAL}｜verifyVotes=${VOTES}｜verifyLow=${!!(A && A.verifyLow)}｜confidential=${CONFIDENTIAL}｜depth=${DEPTH}｜maxRounds=${MAX_ROUNDS}｜budget=${budget && budget.total ? Math.round(budget.total / 1000) + 'k' : 'none'}`)
 
 if (RAW_VOTES !== VOTES) log(`ℹ️ verifyVotes ${RAW_VOTES} → ${VOTES}（强制取奇：偶数票下 "HARD 过半" 退化成要求全票，比少一票更难杀假 claim 却贵一倍）`)
 if (castMode === 'generic-optin') log(`ℹ️ generic:true —— 按显式请求用了通用默认盘（${GENERIC_PANEL.map(e => e.agentType || e.role).join('/')}），非按题选人。`)
@@ -808,6 +833,11 @@ const runRecord = {
   fallbackOnlyHardRefutations: _fallbackOnly, // 仅靠散文正则救回的条数 —— 主通道遵守率的补数
   escalatedClaims,             // 因收到硬反证而被追派复核的 claim 数
   escalationVotes,             // 追派出去的额外 skeptic 票数（成本核算）
+  verifySpawned,               // 实际派出的 skeptic 总数（出口闸的分子）
+  maxVerifyAgents: MAX_VERIFY_AGENTS || null,
+  // 触闸后被跳过的验证次数。**非零即意味着本次结论有未经验证的 claim** ——
+  // 它们停在 NOTCHECKED，既没被确认也没被驳倒，读结论时必须按此打折。
+  gatedClaims,
   killedCount: KILLED_LIST.length,    // 确定性计算，不取 synthesize 的自述
   // synthesize 自述的 killed 条数。它被 :495 的封闭清单散文约束要求"逐字照抄"，
   // 而本文件自己的结论是散文约束不可靠 —— 记下偏离量，让"到底遵不遵守"变成可测而非可信。
@@ -826,6 +856,12 @@ const runRecord = {
   } : null,
   tokensSpent: budget ? budget.spent() : null,
 }
+// 出口闸告警：触闸不是错误，但它意味着本次结论**有未经验证的 claim**。放在收尾播报是因为
+// 触闸那一刻只播一次、之后静默累加，不在这里报总数的话它会淹没在几十条 log 里。
+if (gatedClaims > 0) {
+  log(`⛔ 出口闸拦下 ${gatedClaims} 次验证（已派 ${verifySpawned}/${MAX_VERIFY_AGENTS}）——这些 claim 停在 NOTCHECKED，既没被确认也没被驳倒。读结论时按此打折；要跑全就调大 maxVerifyAgents 重来。`)
+}
+
 // star 空壳告警：受检 claim 不为零却什么都没进 mustFix/shouldFix，多半是合成偷懒或来源映射串桶，
 // 不是"真的没问题"。不 throw —— agreements/tensions/decision 仍完整可用，只损失呈现层。
 if (runRecord.starBuckets && _verified > 0
