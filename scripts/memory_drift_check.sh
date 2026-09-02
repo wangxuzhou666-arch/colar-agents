@@ -83,7 +83,11 @@ def main():
     index_files = ["MEMORY.md"] + sorted(glob.glob("*-index.md"))
     if os.path.isfile("transcripts/INDEX.md"):
         index_files.append("transcripts/INDEX.md")
-    ref_pat = re.compile(r"(?:feedback|project|user|reference)_[a-z_0-9]+\.md")
+    # 字符类必须含 "-"：SOUL 的时间锚点纪律要求 time-bound 文件带绝对日期
+    # (project_<topic>_YYYY-MM-DD.md)，而没有 "-" 时正则会在第一个
+    # 连字符处截断，于是「索引里明明有」被误报成 UNINDEXED。两个失效方向都坏：
+    # 误报是噪音（会训练人忽略本检查），漏报则让指向带日期文件的死链永远查不出来。
+    ref_pat = re.compile(r"(?:feedback|project|user|reference)_[a-z_0-9-]+\.md")
     indexed = set()
     for f in index_files:
         indexed.update(ref_pat.findall(read_text(f)))
@@ -231,7 +235,8 @@ def main():
             + "  注: 计数 drift 是索引腐烂早期信号。改成动态口径(ls | wc -l)或更新数字。")
 
     # --- 7. Unprefixed content files ---
-    KNOWN_INFRA = {"MEMORY.md", "ARCHIVE.md", "BACKLOG.md", "README.md"}
+    # BACKLOG.archive.md 与 BACKLOG.md 同族（前者是后者的归档），同属 infra 而非 memory 内容。
+    KNOWN_INFRA = {"MEMORY.md", "ARCHIVE.md", "BACKLOG.md", "BACKLOG.archive.md", "README.md"}
     unprefixed = []
     for f in sorted(glob.glob("*.md")):
         if f in KNOWN_INFRA or f.endswith("-index.md"):
