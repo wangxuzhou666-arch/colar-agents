@@ -93,7 +93,7 @@ if (!A || typeof A !== 'object') A = {}
 // (2) 未知参数 throw 而不是 warn —— 权衡很清楚：throw 的代价是几秒后重来，
 //     warn 的代价是上面那 46 分钟。且"调用方的意图静默落空"正是本文件通篇在防的病，
 //     对自己的 args 契约不该例外。改契约时**必须同步 bump 版本号和这张表**。
-const SCRIPT_VERSION = '2026-09-02b'
+const SCRIPT_VERSION = '2026-09-04'
 const KNOWN_ARGS = new Set([
   'question', 'decision', 'experts', 'generic', 'context', 'evalMode',
   'verifyVotes', 'verifyLow', 'verifyTopK', 'cheapVerify', 'leanPrompts',
@@ -820,7 +820,9 @@ ${GROUND_RULES}${EVAL_RULES}
           if (st === 'REFUTED') log(`☠️ 判杀：「${clip(c.claim, 70, 'claim')}」（${res.exp.agentType}#r${round}）`)
         }
       }
-      return { ...res, verdicts, checkedKeys }
+      // checkedKeys 以数组返回（2026-09-04 修）：pipeline 阶段产物会经 JSON 序列化，Set 会被
+      // 压成 {}，下游 `r.checkedKeys.has` 直接 TypeError 崩在合成前（实测 23 个 agent 白跑）。
+      return { ...res, verdicts, checkedKeys: [...checkedKeys] }
     }
   )
 }
@@ -954,7 +956,9 @@ const digest = clean.map(r => {
     // NOTCHECKED 分两种，出口侧必须能区分（"没验"长得像"验过没问题"是本文件反复在修的病）：
     //   TRIAGED = 按 decisionImpact/verifyTopK 主动不验，是设计意图；
     //   GATED   = 送去验了但撞上 maxVerifyAgents 出口闸，是预算不够。
-    const wasSent = r.checkedKeys ? r.checkedKeys.has(norm(c.claim)) : true
+    // 兼容 Set / 数组两种形态（见 runRound 末尾注释）：Set 只在未经序列化时存在。
+    const sentKeys = r.checkedKeys instanceof Set ? r.checkedKeys : new Set(Array.isArray(r.checkedKeys) ? r.checkedKeys : [])
+    const wasSent = r.checkedKeys ? sentKeys.has(norm(c.claim)) : true
     const checkPolicy = status !== 'NOTCHECKED' ? 'VERIFIED' : (wasSent ? 'GATED' : 'TRIAGED')
     return {
       claim: c.claim, confidence: c.confidence, evidence: clip(c.evidence, 500, '证据'),
