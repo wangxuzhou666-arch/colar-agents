@@ -1,8 +1,8 @@
 ---
 name: wt-discipline
-description: "用 git worktree 做隔离验证/部署/并行分支时的纪律 —— 一律走 `wt` 包装脚本（scripts/wt），落点固定 ~/.wt/<repo>-<用途>，绝不 cd 进 worktree、绝不把要留存的产物写在 worktree 里。治六类实证踩坑：cwd 悬空后满屏 ENOENT · /tmp↔/private/tmp 别名让 remove 失配 · 防御式 rm -rf+prune 仪式 · 产物随 worktree 蒸发（部署史丢过一条）· 落点四处开花 · .venv/node_modules 每次手搭 · 三样不进 git 的产物逐个撞部署门（.venv 用 symlink 会让 rsync --delete 删掉服务器真实目录）· worktree 只上线 HEAD 造成「本地改了线上没变」。Use when: creating a throwaway worktree to verify a build/test at a specific ref, running a clean-tree deploy, working two branches in parallel, or debugging \"worktree remove 删不掉 / 目录已存在 / No such file or directory / 部署记录不见了\"."
-version: 1.1.0
-source: session-derived (2026-08-18)。全量扫 5297 个 session、200 个含真实 git worktree 操作的会话、288 次调用统计得出；六类失败模式均有现场证据。v1.1.0 (2026-08-19)：织锦一次干净部署实战补第四、五节——三样不进 git 的必补产物（素材/node_modules/.venv）、.venv 用 symlink 会触发 rsync --delete 删服务器真实目录、worktree 只上线 HEAD 导致「本地改了线上没变」。
+description: "用 git worktree 做隔离验证/部署/并行分支时的纪律 —— 一律走 `wt` 包装脚本（scripts/wt），落点固定 ~/.wt/<repo>-<用途>，绝不 cd 进 worktree、绝不把要留存的产物写在 worktree 里。治六类实证踩坑：cwd 悬空后满屏 ENOENT · /tmp↔/private/tmp 别名让 remove 失配 · 防御式 rm -rf+prune 仪式 · 产物随 worktree 蒸发（部署史丢过一条）· 落点四处开花 · .venv/node_modules 每次手搭 · 四样不进 git 的产物逐个撞门（素材/node_modules/.venv/种子库；.venv 用 symlink 会让 rsync --delete 删掉服务器真实目录；活 sqlite 要用 .backup 不是 cp）· symlink 挂的 .venv 若有 editable install 会让「干净树验证」静默变成在量脏主树 · worktree 只上线 HEAD 造成「本地改了线上没变」。Use when: creating a throwaway worktree to verify a build/test at a specific ref, running a clean-tree deploy, working two branches in parallel, or debugging \"worktree remove 删不掉 / 目录已存在 / No such file or directory / 部署记录不见了 / 干净树上一堆无关测试红\"."
+version: 1.2.0
+source: session-derived (2026-08-18)。全量扫 5297 个 session、200 个含真实 git worktree 操作的会话、288 次调用统计得出；六类失败模式均有现场证据。v1.1.0 (2026-08-19)：织锦一次干净部署实战补第四、五节——三样不进 git 的必补产物（素材/node_modules/.venv）、.venv 用 symlink 会触发 rsync --delete 删服务器真实目录、worktree 只上线 HEAD 导致「本地改了线上没变」。v1.2.0 (2026-09-11)：织锦一次「在干净树上还 check_all 的债」实战——第四样产物（种子库 `data/*.db`，缺了会让十几条无关测试红）、活 sqlite 用 `sqlite3 .backup` 而非 `cp`（2.1GB 实测 3.3s，有并发写仍一致）、以及 symlink 挂 `.venv` 时必须先自证 import 解析到 worktree（否则整轮验证在量主树）。同轮订正了一个错判：我曾因「库 2GB 且在被写」就断言干净树跑不了全量并写进 commit message，实为没想到 `.backup`。
 ---
 
 # worktree 纪律
@@ -53,20 +53,41 @@ worktree 是**一次性**的。部署日志、生成的报告、临时写的验�
 - **要长期存在的第二个开发环境** → 那不是 throwaway worktree，用正经 clone 或长期分支，别塞进 `~/.wt`
   （`~/.wt` 的语义是"随时可以 gc 掉"）。
 
-## 四、干净部署 worktree：三样不进 git 的本地产物
+## 四、四样不进 git 的本地产物
 
-worktree 给的是**「git 眼里干净」的副本**，部署脚本要的却是**「能跑」的完整环境**。三样东西不进 git，
-worktree 里天然缺席，缺哪样就在哪道门红——而且每红一次要白跑一次 build。
+worktree 给的是**「git 眼里干净」的副本**，部署脚本/测试门要的却是**「能跑」的完整环境**。
+四样东西不进 git，worktree 里天然缺席，缺哪样就在哪道门红——而且每红一次要白跑一次 build。
 
 | 产物 | 缺了在哪道门红 | 补法 |
 |---|---|---|
 | 素材本体 `frontend/public/{blocks,fabrics,artworks,hdri}` 约 130MB | 素材完整门 | 从主仓 `rsync -a` |
 | `frontend/node_modules` 约 720MB | 本地 build 门（module-not-found） | 从主仓 `cp -a` |
 | `.venv` 约 730MB | 契约门（`.venv/bin/python: No such file`） | 从主仓 `cp -a`，**必须是真实目录** |
+| **种子库 `data/*.db`**（织锦 `demo.db` 约 2.1GB） | **任何跑 pytest 的干净树**：库不在，测试自建一个 4KB 空壳，十几条依赖种子数据的测试红 | `sqlite3 ".backup"`，**不是 `cp`**（见下） |
 
-**`.venv` 绝不能用 symlink 顶替。** rsync 的 `--exclude '.venv/'` 尾斜杠只匹配目录、不匹配 symlink，
-`--delete` 于是会把服务器上真实的 `/opt/fabric-agent/.venv` 一起删掉，后端当场死。
+**活 sqlite 用 `.backup`，不要 `cp`。** 常驻 dev server 正在写那个库，`cp` 拿到的可能是撕裂的快照。
+`sqlite3 <src> ".backup '<dst>'"` 走 SQLite 的备份 API，有并发写也给一致快照——2.1GB 实测 3.3 秒，
+拷完 `PRAGMA integrity_check` + 关键表 `COUNT(*)` 对一下就有据可说。
+
+> 别因为"2GB 太大"就放弃在干净树上跑全量门（2026-09-11 实证：我先这么判断，写进了 commit message
+> 说「干净 worktree 跑不了全量」，结论是错的——只是没想到 `.backup`。3 秒的事）。
+
+**部署 worktree 不要带这一样。** 服务器有它自己的库，把本地种子库 rsync 上去是覆盖生产数据。
+这一行只服务**本地验证**用的 worktree（跑 pytest / check_all）。
+
+**`.venv` 绝不能用 symlink 顶替（部署路径）。** rsync 的 `--exclude '.venv/'` 尾斜杠只匹配目录、
+不匹配 symlink，`--delete` 于是会把服务器上真实的 `/opt/fabric-agent/.venv` 一起删掉，后端当场死。
 `update.sh` 有一道专门的门挡这个（2026-07-30 事故留下的）——撞上它不是脚本挑剔，是你正在复刻那次事故。
+
+**但 `wt` 脚本给本地 worktree 挂的就是 symlink**（`.venv` / `node_modules` / `frontend/node_modules`），
+本地跑测试没问题，只有一个陷阱必须先排：**若 venv 里有 editable install 或指回主仓的 `.pth`，
+worktree 里 import 到的会是主树的代码，你那一轮"干净树验证"就静默变成了在量脏主树**。
+开跑前先自证一行，别省：
+
+```bash
+wt run <用途> bash -c '.venv/bin/python -c "import <你的模块> as m; print(m.__file__)"'
+# 打出来必须是 ~/.wt/... 的路径；打出主仓路径就立刻停，这轮验证无效
+```
 
 > 实证（2026-08-19）：一次干净部署连撞三样，每样一轮，两轮白 build。三样一次补齐才走通。
 
@@ -78,6 +99,8 @@ git -C "$REPO" worktree add --detach "$WT" HEAD
 for d in blocks fabrics artworks hdri; do rsync -a "$REPO/frontend/public/$d/" "$WT/frontend/public/$d/"; done
 cp -a "$REPO/frontend/node_modules" "$WT/frontend/node_modules"
 cp -a "$REPO/.venv" "$WT/.venv"          # cp，不是 ln -s
+# 本地验证用的树再加这一步（部署树跳过——服务器有自己的库）：
+sqlite3 "$REPO/data/demo.db" ".backup '$WT/data/demo.db'"
 ```
 
 ## 五、worktree 部署上线的是 HEAD，不是你手上的改动
