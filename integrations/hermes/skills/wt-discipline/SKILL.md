@@ -1,8 +1,8 @@
 ---
 name: wt-discipline
 description: "用 git worktree 做隔离验证/部署/并行分支时的纪律 —— 一律走 `wt` 包装脚本（scripts/wt），落点固定 ~/.wt/<repo>-<用途>，绝不 cd 进 worktree、绝不把要留存的产物写在 worktree 里。治六类实证踩坑：cwd 悬空后满屏 ENOENT · /tmp↔/private/tmp 别名让 remove 失配 · 防御式 rm -rf+prune 仪式 · 产物随 worktree 蒸发（部署史丢过一条）· 落点四处开花 · .venv/node_modules 每次手搭 · 不进 git 的本地产物实测十三样、逐个撞门（素材/node_modules/.venv/种子库/.env/子服务 node_modules/部署史/四个快照记录；一棵新 worktree 跑不绿全量门是构造使然；缺 .env 时门不红但读数悄悄变；.venv 用 symlink 会让 rsync --delete 删掉服务器真实目录；活 sqlite 要用 .backup 不是 cp）· symlink 挂的 .venv 若有 editable install 会让「干净树验证」静默变成在量脏主树 · worktree 只上线 HEAD 造成「本地改了线上没变」。Use when: creating a throwaway worktree to verify a build/test at a specific ref, running a clean-tree deploy, working two branches in parallel, or debugging \"worktree remove 删不掉 / 目录已存在 / No such file or directory / 部署记录不见了 / 干净树上一堆无关测试红\"."
-version: 1.3.0
-source: session-derived (2026-08-18)。全量扫 5297 个 session、200 个含真实 git worktree 操作的会话、288 次调用统计得出；六类失败模式均有现场证据。v1.1.0 (2026-08-19)：织锦一次干净部署实战补第四、五节——三样不进 git 的必补产物（素材/node_modules/.venv）、.venv 用 symlink 会触发 rsync --delete 删服务器真实目录、worktree 只上线 HEAD 导致「本地改了线上没变」。v1.2.0 (2026-09-11)：织锦一次「在干净树上还 check_all 的债」实战——第四样产物（种子库 `data/*.db`，缺了会让十几条无关测试红）、活 sqlite 用 `sqlite3 .backup` 而非 `cp`（2.1GB 实测 3.3s，有并发写仍一致）、以及 symlink 挂 `.venv` 时必须先自证 import 解析到 worktree（否则整轮验证在量主树）。v1.3.0 (2026-09-11，同一轮继续撞)：第四节重写——**一棵新 worktree 跑不绿全量门是构造使然**，按「范围验证（前四样）/ 门级判决（十三样）」分档；补 `.env`（唯一缺了不报错、只让读数悄悄变的一样，symlink 不 cp）、子服务 node_modules、`.deploy-history.jsonl`、四个快照记录；方法论教训：开工前把门的每一道读一眼就能一次列全，逐轮撞要付每轮 6 分半的 pytest。同轮订正了一个错判：我曾因「库 2GB 且在被写」就断言干净树跑不了全量并写进 commit message，实为没想到 `.backup`。
+version: 1.3.1
+source: session-derived (2026-08-18)。全量扫 5297 个 session、200 个含真实 git worktree 操作的会话、288 次调用统计得出；六类失败模式均有现场证据。v1.1.0 (2026-08-19)：织锦一次干净部署实战补第四、五节——三样不进 git 的必补产物（素材/node_modules/.venv）、.venv 用 symlink 会触发 rsync --delete 删服务器真实目录、worktree 只上线 HEAD 导致「本地改了线上没变」。v1.2.0 (2026-09-11)：织锦一次「在干净树上还 check_all 的债」实战——第四样产物（种子库 `data/*.db`，缺了会让十几条无关测试红）、活 sqlite 用 `sqlite3 .backup` 而非 `cp`（2.1GB 实测 3.3s，有并发写仍一致）、以及 symlink 挂 `.venv` 时必须先自证 import 解析到 worktree（否则整轮验证在量主树）。v1.3.0 (2026-09-11，同一轮继续撞)：第四节重写——**一棵新 worktree 跑不绿全量门是构造使然**，按「范围验证（前四样）/ 门级判决（十三样）」分档；补 `.env`（唯一缺了不报错、只让读数悄悄变的一样，symlink 不 cp）、子服务 node_modules、`.deploy-history.jsonl`、四个快照记录；方法论教训：开工前把门的每一道读一眼就能一次列全，逐轮撞要付每轮 6 分半的 pytest。v1.3.1：再补一类不在产物清单里的假红——拿 mtime 当新鲜度判据的门（checkout 会把 mtime 刷成当下），认出来跳过即可。同轮订正了一个错判：我曾因「库 2GB 且在被写」就断言干净树跑不了全量并写进 commit message，实为没想到 `.backup`。
 ---
 
 # worktree 纪律
@@ -83,6 +83,12 @@ worktree 给的是**「git 眼里干净」的副本**，部署脚本/测试门�
 | `.deploy-history.jsonl` | 看板对账门（`FileNotFoundError`） | `cp` |
 | 四个快照记录 `.audit-deps.json` · `.coverage-snapshot.json` · `.mutation-check.json` · `.e2e-smoke.json` | 快照新鲜度门（报「从没跑过」） | `cp`（文件名逐字抄，别猜——猜过 `.e2e-snapshot.json`，真名是 `.e2e-smoke.json`） |
 | `.gate-results.json` · `.routes-probe.json` | 视门而定 | `cp` |
+
+**还有一类不在清单里、但一样会假红：拿 mtime 当新鲜度判据的门。** `git checkout` 把每个文件的
+mtime 刷成**当下**，于是任何「快照时间 vs 文件 mtime」的比较在新 worktree 里必然报「文件比快照新」。
+织锦实证：依赖审计门在 worktree 里报「lock 在快照之后变过」（列了三个 lock 文件），
+而主树上同一道门是绿的——lock 一个字节没变，变的只是 mtime。判别法：`git diff <snapshot-sha> -- <那些文件>`
+为空就是假红。**补不了、也不该补**，认出来跳过即可。
 
 **`.env` 是这堆里唯一「缺了不报错」的一样，所以最危险。** 它是 gitignore 的，里面既有凭证也有
 功能开关；缺了它开关全部回落默认值，于是**门不红、数字变了**。织锦实证：干净树没有 `.env`
