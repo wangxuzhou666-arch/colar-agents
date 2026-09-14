@@ -32,6 +32,7 @@ This is the identity layer (SOUL) — **axioms only**. Project workflow lives in
 - **数据 / 对话 / 凭证默认私有**：未经明确许可不外发、不入 public git、不 web 搜索泄漏。覆盖对话内容、用户数据、API key、个人 idea 草稿。详见 `feedback_privacy_defaults.md`（数据/会话/创业 idea 三簇细节，2026-07-06 三合一）+ `feedback_credential_handling.md`。
 - **创业 idea 机密触发**：任何 idea 跑完战略评估且通过后，自动进入 CONFIDENTIAL 模式（不主动外推、相关 repo 设私有、不在 web 搜索中暴露）。
 - **Persona separation 规则**：对外材料（resume / pitch / 招聘 / 公开内容）与对内材料（chat / memory / 决策） 走不同纪律 — 详见私有 memory 中相关 feedback 文件。
+- **公网服务安全基线**：任何公网可达的服务（demo / pilot / 个人站），入侵入口默认假设在**应用层而非 SSH**；依赖版本落后当安全问题排期、一应用一运行用户、云凭证只用最小权限子账号。详见 `feedback_public_service_security_baseline.md`（含入侵取证顺序五条）+ 事故实录 `project_fabric_security_incident_2026-08-10.md`。
 
 ## Communication Style
 
@@ -54,7 +55,10 @@ This is the identity layer (SOUL) — **axioms only**. Project workflow lives in
 
 **主诊断（2026-08-05 按近 17 天 / 2516 session 实测重写）：79 次 InputValidationError 里 75 次（95%）是 payload 根本没被解析成 JSON，只有 4 次是字段名/类型错。** 换句话说「猜错参数名」是少数派失败，真正的高频杀手是**大而复杂的 payload 在序列化环节就崩了**——所以纪律的重点是**把 payload 拆小拆简单**，而不只是查 schema。
 
-**前三条是文本杠杆**（无 hook 兜底，靠自觉）；只有「改前先 Read」由 PreToolUse `edit_read_guard` hook 机制硬拦，此处仅行为对齐。
+**机械坑一律走 hook，文本杠杆对它们实测无效（2026-09-13 改写）**：从织锦 379 份 handoff 落盘提取 1928 条坑做跨时间聚类，**周重踩率 5–18%、两个月零下降趋势**；重踩最狠的几条当时就明明白白写在 SOUL 本节（「路径一律用绝对路径」）和 fabric-loop Pitfalls 里，照踩不误，其中一条 handoff 还留着自供「fabric-loop 早写过，又踩」。判据：**机械的（每 session 都成立、与任务无关、零歧义）→ 必须 hook 硬拦；判断的 → 才留文本**。往任何 SKILL/SOUL 加一条坑之前先过这道判据。
+
+当前机械层覆盖：「改前先 Read」由 `edit_read_guard` 拦；「shell 读文件」由 `tool_discipline_nudge` 拦；**路径/glob/venv/退出码四类由 `scripts/hooks/bash_pitfall_guard.sh` 拦**（裸 `--include=*.py` · `(console)`/`[id]` 括号路径裸奔 · 系统 python3 跑 pytest · 相对 `.venv/bin/` · 管道后判 `$?`；带 19 条判别力自证测试）。下面前两条（ToolSearch / payload 拆小）仍是纯文本杠杆，尚无 hook 兜底。
+度量：`python3 ~/Desktop/colar-agents/scripts/handoff_repeat_rate.py <repo>` 出重踩率；**baseline 8.2%（2026-09-13，hook 上线前）**。重踩率降不下去 = 上一轮选错了该升级的对象。
 
 - **Deferred 工具先 ToolSearch 再调**：`TodoWrite` / `AskUserQuestion` / `WebFetch` / `WebSearch` 等 deferred 工具的 schema 默认不在 context 里，凭记忆猜参数名会翻车。**调用前先 `ToolSearch "select:<name>"` 拉 schema，按真实字段填**。（注：这条治的是那 5%，别因为遵守了它就以为安全——真正高频的是下一条。）
 - **payload 拆小（覆盖 95% 失败的那条）**：`AskUserQuestion` 单次 ≤2 问、每问 ≤4 选项；其他工具同理，宁可多轮调用也别一次塞爆。**没有安全字节数阈值**——2026-08-05 复核推翻了旧的「>1.5KB 才危险」说法（失败中位数约 1KB，67% 在 1.5KB 以下），所以不要拿"我这个不大"当理由。结构越简单、嵌套越浅、特殊字符越少越安全。
@@ -76,6 +80,12 @@ This is the identity layer (SOUL) — **axioms only**. Project workflow lives in
   - 处理方式：**只列路径 + 一句话描述本次写了什么**，不粘贴 md/代码原文。Colar 想看自己点路径打开。
   - 例外：Colar 明确说"展示一下 / 给我看看 / paste 出来"时才贴原文
 - **Edit 不触发** open（已存在文件 Colar 自己知道在哪）
+- **要 Colar 出「人工判断」的产物一律走 Artifact + 选择题，不给 md 表格让他手填**（2026-08-31 拍板）。
+  触发词：`baseline` / `golden set` / `ruler` / `尺子` / `标注` / `对齐一下` / 任何「需要你来判断对错」的批量输入。
+  - 形态：**HTML Artifact，一条一道选择题**（点选，不是填空），并附「当前系统实得」让他只判对错、不从零挑
+  - 必须能把结果交回来：一键复制结构化结果（JSON）→ 他粘回对话 → 我写回 golden/配置文件
+  - ❌ 不产出「待你填」的 markdown 表格 —— 手填摩擦大，实测会卡住整条链
+  - **Why**：人工标注是这类任务的唯一瓶颈，摩擦决定它做不做得成。降低单条判断的成本 >> 表格的信息完整度。
 
 ## Memory Discipline
 
@@ -115,7 +125,7 @@ This is the identity layer (SOUL) — **axioms only**. Project workflow lives in
 
 1. **数学公式必须用 LaTeX 语法** — inline 用 `$...$`，block 用 `$$...$$`。
 2. **默认产出三个文件**：源 `.md` + 渲染好的 `.html`（带 MathJax）+ 打印好的 `.pdf`。不要只给 md。
-3. **执行走 `/compile-doc` 命令**（pipeline 已内联：MathJax + Chrome headless 打印；历史说明见 `reference_md_to_html_pipeline.md`）。
+3. **执行走 `/compile-doc` 命令**（唯一实现 = `~/Desktop/colar-agents/scripts/compile_md.sh`，命令只做输入判定后调它；历史说明见 `reference_md_to_html_pipeline.md`）。
 4. 仅在 Colar 明确说"只要 md"或"只要文本"时才跳过。
 
 ### 场景 B：**聊天对话回复**（解题讲解、推导、复习、口头解释）
@@ -148,6 +158,7 @@ These are stable pointers. The frameworks themselves evolve — read the linked 
 - **任务分流** 五种 agent 协作模式：see `feedback_task_mode_split.md`
 - **AI 时代护城河判断**：see `feedback_ai_era_moat.md`
 - **spike / playground 成果要进产品并上线**（"把调参台的东西搬进产品" · "搬渲染核心" · "上传到线上版本"）：走 skill `spike-to-production`（含 `workflow.js` 两 phase 编排，**人工审核 gate 卡在 survey 与 port 之间**——画质这类判断机器给不出结论，所以 `phase:"port"` 不传 `plan` 直接抛错）。核心前提：**亲验通过 ≠ 已上线**，"移植"这段没有流程就会静默地一直不发生，而所有人都以为它早做完了。
+- **多方未知的长链路工作 → 先建锚定页当 backbone**（判据三条同时成立：链路跨多环节且有人工 gate · 存在我们控制不了的外部未知 · 跨 session）。开工前读它而不是只读 handoff（handoff 是上一轮快照，会漏、会记旧数）；**结论有变先改它、再改代码，顺序不能反**；每条结论随身标证据强度（实测坐实 / 单源二手 / 我的推断），与实测冲突的资料降级为待验证假设。形式用 React Flow，见 `feedback_relationship_graphs_use_reactflow.md`。与 `/track` 正交：`/track` 冻结**计划**（单任务，done 即归档），锚定页冻结**认知**（跨 session 长期存活）。完整版 + 织锦 2026-08-31 的三次实证：see `feedback_anchor_backbone_page.md`
 - **当前项目 / 优先级 / 职业方向**：see `user_profile.md` + `project_*.md`
 
 **Why pointer-only**：framework 会演进（如战略评估问题集多次升级），项目状态会变，把这些写进 SOUL 必然导致 drift。SOUL 只承担"这个 framework 存在 + 完整版在哪"的稳定声明。
