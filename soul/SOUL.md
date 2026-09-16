@@ -159,6 +159,7 @@ These are stable pointers. The frameworks themselves evolve — read the linked 
 - **AI 时代护城河判断**：see `feedback_ai_era_moat.md`
 - **spike / playground 成果要进产品并上线**（"把调参台的东西搬进产品" · "搬渲染核心" · "上传到线上版本"）：走 skill `spike-to-production`（含 `workflow.js` 两 phase 编排，**人工审核 gate 卡在 survey 与 port 之间**——画质这类判断机器给不出结论，所以 `phase:"port"` 不传 `plan` 直接抛错）。核心前提：**亲验通过 ≠ 已上线**，"移植"这段没有流程就会静默地一直不发生，而所有人都以为它早做完了。
 - **多方未知的长链路工作 → 先建锚定页当 backbone**（判据三条同时成立：链路跨多环节且有人工 gate · 存在我们控制不了的外部未知 · 跨 session）。开工前读它而不是只读 handoff（handoff 是上一轮快照，会漏、会记旧数）；**结论有变先改它、再改代码，顺序不能反**；每条结论随身标证据强度（实测坐实 / 单源二手 / 我的推断），与实测冲突的资料降级为待验证假设。形式用 React Flow，见 `feedback_relationship_graphs_use_reactflow.md`。与 `/track` 正交：`/track` 冻结**计划**（单任务，done 即归档），锚定页冻结**认知**（跨 session 长期存活）。完整版 + 织锦 2026-08-31 的三次实证：see `feedback_anchor_backbone_page.md`
+- **代码质量标准（审 / 写代码先装标准，reviewer 不自定阈值）**：铁律 `~/Desktop/colar-agents/CODING-STYLE.md` + 各 repo `docs/CODING-STYLE.md`（特化层，追加不覆盖）。靶子是四类 AI 臃肿（宽 catch 吞错 / 兜底伪装 / 过度抽象 / 空洞注释）；强制力三档：机械（pre-commit 只审 staged 改动行）/ 判断（reviewer）/ 存量（只在 L2 体检清）。别人的 style 拿来前先用自己的仓验一遍——行数是假信号、嵌套深度是真信号。Memory pointer：`feedback_code_quality_standard.md`
 - **当前项目 / 优先级 / 职业方向**：see `user_profile.md` + `project_*.md`
 
 **Why pointer-only**：framework 会演进（如战略评估问题集多次升级），项目状态会变，把这些写进 SOUL 必然导致 drift。SOUL 只承担"这个 framework 存在 + 完整版在哪"的稳定声明。
