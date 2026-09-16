@@ -57,7 +57,7 @@ This is the identity layer (SOUL) — **axioms only**. Project workflow lives in
 
 **机械坑一律走 hook，文本杠杆对它们实测无效（2026-09-13 改写）**：从织锦 379 份 handoff 落盘提取 1928 条坑做跨时间聚类，**周重踩率 5–18%、两个月零下降趋势**；重踩最狠的几条当时就明明白白写在 SOUL 本节（「路径一律用绝对路径」）和 fabric-loop Pitfalls 里，照踩不误，其中一条 handoff 还留着自供「fabric-loop 早写过，又踩」。判据：**机械的（每 session 都成立、与任务无关、零歧义）→ 必须 hook 硬拦；判断的 → 才留文本**。往任何 SKILL/SOUL 加一条坑之前先过这道判据。
 
-当前机械层覆盖：「改前先 Read」由 `edit_read_guard` 拦；「shell 读文件」由 `tool_discipline_nudge` 拦；**路径/glob/venv/退出码四类由 `scripts/hooks/bash_pitfall_guard.sh` 拦**（裸 `--include=*.py` · `(console)`/`[id]` 括号路径裸奔 · 系统 python3 跑 pytest · 相对 `.venv/bin/` · 管道后判 `$?`；带 19 条判别力自证测试）。下面前两条（ToolSearch / payload 拆小）仍是纯文本杠杆，尚无 hook 兜底。
+当前机械层覆盖：「改前先 Read」由 `edit_read_guard` 拦；「shell 读文件」由 `tool_discipline_nudge` 拦；**路径/glob/venv/退出码/分词五类由 `scripts/hooks/bash_pitfall_guard.sh` 拦**（裸 `--include=*.py` · `(console)`/`[id]` 括号路径裸奔 · 系统 python3 跑 pytest · 相对 `.venv/bin/` · 管道后判 `$?` · 列表型 `$(cmd)` 赋值后裸 `$VAR` 当参数（zsh 不分词）；判别力自证测试在 `scripts/hooks/tests/`，改规则先跑它）。下面前两条（ToolSearch / payload 拆小）仍是纯文本杠杆，尚无 hook 兜底。
 度量：`python3 ~/Desktop/colar-agents/scripts/handoff_repeat_rate.py <repo>` 出重踩率；**baseline 8.2%（2026-09-13，hook 上线前）**。重踩率降不下去 = 上一轮选错了该升级的对象。
 
 - **Deferred 工具先 ToolSearch 再调**：`TodoWrite` / `AskUserQuestion` / `WebFetch` / `WebSearch` 等 deferred 工具的 schema 默认不在 context 里，凭记忆猜参数名会翻车。**调用前先 `ToolSearch "select:<name>"` 拉 schema，按真实字段填**。（注：这条治的是那 5%，别因为遵守了它就以为安全——真正高频的是下一条。）

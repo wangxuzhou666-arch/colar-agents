@@ -12,6 +12,10 @@
 #
 # 新增规则的判据：必须是「机械的 + 每个 session 都成立 + 与具体任务无关 + 已实证重踩」四条全中。
 # 判断类的坑不许进这里 —— 那些该留在 skill 文本里给模型读。
+#
+# 自证测试：bash scripts/hooks/tests/test_bash_pitfall_guard.sh —— 每条规则都有正例（必 deny）
+# 与反例（必放行，含各规则明写的放行例外）。改任何规则先跑它；新规则不带正反用例不许进。
+# 已知限制：heredoc 正文也在被扫的命令串里，往文件里写含这些形状的内容请用 Write/Edit 工具。
 
 input=$(cat 2>/dev/null || true)
 [ -z "$input" ] && exit 0
@@ -73,6 +77,21 @@ fi
 if [ -z "$suggest" ]; then
   if printf '%s' "$cmd" | grep -q '|' && printf '%s' "$cmd" | grep -qE '\$\?'; then
     suggest="管道里 \$? 取的是最后一段的退出码，前段失败被静默吞掉（实证连踩三天）。用 \${pipestatus[1]}（zsh）或让被判断的命令不进管道"
+  fi
+fi
+
+# ---- 规则 6：zsh 不对裸 $VAR 分词 ----
+# VAR=$(find / grep -l / git diff --name-only …) 之后 pytest $VAR：zsh 把整块多行输出当 1 个参数。
+# 实证 2026-09-15：30 个路径当 1 参数，pytest "no tests ran"；经 bash -c 跑不暴露，
+# 所以 bash 肌肉记忆在这里必错。判定逻辑在同目录 zsh_wordsplit_check.py（形状复杂，bash 正则写不清）；
+# 判定器缺失或异常一律放行。
+if [ -z "$suggest" ]; then
+  checker="$(dirname "${BASH_SOURCE[0]}")/zsh_wordsplit_check.py"
+  if [ -f "$checker" ]; then
+    hit=$(printf '%s' "$cmd" | python3 "$checker" 2>/dev/null | head -n 1 || true)
+    if [ -n "$hit" ]; then
+      suggest="zsh 不对裸 \$$hit 分词：它由多行列表型命令替换赋值，整块会被当成 1 个参数（2026-09-15 实测 30 个路径 → pytest \"no tests ran\"；bash -c 下不暴露）。用 \${=$hit} 强制分词，或把 \$(cmd) 直接内联到参数位（zsh 对命令替换会分词），或改走 | xargs"
+    fi
   fi
 fi
 
