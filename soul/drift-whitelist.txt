@@ -14,4 +14,7 @@ PATH:settings.json
 
 # VC 模型 framework spec — 实际在私有 ~/Desktop/colar-memory/frameworks/vc-model/spec/v0.6.md
 PATH:spec/v0.6.md
-PATH:docs/CODING-STYLE.md   # 各 repo 的相对模式（织锦 docs/ 有、本仓无），不是单一路径 — 2026-09-15
+
+# 代码质量标准的 repo 层 — 各 repo 的相对模式（织锦 docs/ 有、本仓无），不是单一路径。2026-09-15
+# 注意：is_whitelisted 是整行精确匹配，条目行后面不能跟行内注释，否则永远匹配不上。
+PATH:docs/CODING-STYLE.md
