@@ -1,8 +1,8 @@
 ---
 name: wt-discipline
 description: "用 git worktree 做隔离验证/部署/并行分支时的纪律 —— 一律走 `wt` 包装脚本（scripts/wt），落点固定 ~/.wt/<repo>-<用途>，绝不 cd 进 worktree、绝不把要留存的产物写在 worktree 里。治六类实证踩坑：cwd 悬空后满屏 ENOENT · /tmp↔/private/tmp 别名让 remove 失配 · 防御式 rm -rf+prune 仪式 · 产物随 worktree 蒸发（部署史丢过一条）· 落点四处开花 · .venv/node_modules 每次手搭 · 不进 git 的本地产物实测十三样、逐个撞门（素材/node_modules/.venv/种子库/.env/子服务 node_modules/部署史/四个快照记录；一棵新 worktree 跑不绿全量门是构造使然；缺 .env 时门不红但读数悄悄变；.venv 用 symlink 会让 rsync --delete 删掉服务器真实目录；活 sqlite 要用 .backup 不是 cp）· symlink 挂的 .venv 若有 editable install 会让「干净树验证」静默变成在量脏主树 · worktree 只上线 HEAD 造成「本地改了线上没变」。Use when: creating a throwaway worktree to verify a build/test at a specific ref, running a clean-tree deploy, working two branches in parallel, or debugging \"worktree remove 删不掉 / 目录已存在 / No such file or directory / 部署记录不见了 / 干净树上一堆无关测试红\"."
-version: 1.3.1
-source: session-derived (2026-08-18)。全量扫 5297 个 session、200 个含真实 git worktree 操作的会话、288 次调用统计得出；六类失败模式均有现场证据。v1.1.0 (2026-08-19)：织锦一次干净部署实战补第四、五节——三样不进 git 的必补产物（素材/node_modules/.venv）、.venv 用 symlink 会触发 rsync --delete 删服务器真实目录、worktree 只上线 HEAD 导致「本地改了线上没变」。v1.2.0 (2026-09-11)：织锦一次「在干净树上还 check_all 的债」实战——第四样产物（种子库 `data/*.db`，缺了会让十几条无关测试红）、活 sqlite 用 `sqlite3 .backup` 而非 `cp`（2.1GB 实测 3.3s，有并发写仍一致）、以及 symlink 挂 `.venv` 时必须先自证 import 解析到 worktree（否则整轮验证在量主树）。v1.3.0 (2026-09-11，同一轮继续撞)：第四节重写——**一棵新 worktree 跑不绿全量门是构造使然**，按「范围验证（前四样）/ 门级判决（十三样）」分档；补 `.env`（唯一缺了不报错、只让读数悄悄变的一样，symlink 不 cp）、子服务 node_modules、`.deploy-history.jsonl`、四个快照记录；方法论教训：开工前把门的每一道读一眼就能一次列全，逐轮撞要付每轮 6 分半的 pytest。v1.3.1：再补一类不在产物清单里的假红——拿 mtime 当新鲜度判据的门（checkout 会把 mtime 刷成当下），认出来跳过即可。同轮订正了一个错判：我曾因「库 2GB 且在被写」就断言干净树跑不了全量并写进 commit message，实为没想到 `.backup`。
+version: 1.3.2
+source: session-derived (2026-08-18)。全量扫 5297 个 session、200 个含真实 git worktree 操作的会话、288 次调用统计得出；六类失败模式均有现场证据。v1.1.0 (2026-08-19)：织锦一次干净部署实战补第四、五节——三样不进 git 的必补产物（素材/node_modules/.venv）、.venv 用 symlink 会触发 rsync --delete 删服务器真实目录、worktree 只上线 HEAD 导致「本地改了线上没变」。v1.2.0 (2026-09-11)：织锦一次「在干净树上还 check_all 的债」实战——第四样产物（种子库 `data/*.db`，缺了会让十几条无关测试红）、活 sqlite 用 `sqlite3 .backup` 而非 `cp`（2.1GB 实测 3.3s，有并发写仍一致）、以及 symlink 挂 `.venv` 时必须先自证 import 解析到 worktree（否则整轮验证在量主树）。v1.3.0 (2026-09-11，同一轮继续撞)：第四节重写——**一棵新 worktree 跑不绿全量门是构造使然**，按「范围验证（前四样）/ 门级判决（十三样）」分档；补 `.env`（唯一缺了不报错、只让读数悄悄变的一样，symlink 不 cp）、子服务 node_modules、`.deploy-history.jsonl`、四个快照记录；方法论教训：开工前把门的每一道读一眼就能一次列全，逐轮撞要付每轮 6 分半的 pytest。v1.3.1：再补一类不在产物清单里的假红——拿 mtime 当新鲜度判据的门（checkout 会把 mtime 刷成当下），认出来跳过即可。同轮订正了一个错判：我曾因「库 2GB 且在被写」就断言干净树跑不了全量并写进 commit message，实为没想到 `.backup`。v1.3.2 (2026-09-15)：第二节补第四条铁律——要在 worktree 里改依赖，`frontend/node_modules` 必须真实拷贝而非 `wt new` 默认的 symlink（织锦 Next 16.2.10→16.3.5 实证：symlink 下 `npm install` 写的是主仓的库，会当场换掉并行线 dev server 正在用的 node_modules）。
 ---
 
 # worktree 纪律
@@ -25,7 +25,7 @@ wt main                 # 打印主工作树根（在 worktree 里调用也返�
 
 不在 PATH 里就用绝对路径 `bash ~/Desktop/colar-agents/scripts/wt ...`。
 
-## 二、三条铁律
+## 二、四条铁律
 
 **1. 不 cd 进 worktree，只用 `wt run`。**
 Claude Code 的 Bash cwd 跨调用持久。`cd` 进去干活、下一条命令把它删掉，shell 就卡在一个不存在的目录里，
@@ -44,6 +44,18 @@ worktree 是**一次性**的。部署日志、生成的报告、临时写的验�
 
 **3. `wt rm` 被拒绝时，先看，别条件反射加 `--force`。**
 拒绝的意思是那里面有你没提交的东西。搬回主仓再拆。
+
+**4. 要在 worktree 里改依赖，`frontend/node_modules` 必须是真实拷贝，不能是 `wt new` 默认挂的 symlink。**
+symlink 指回主仓，worktree 里的 `npm install` 写的就是主仓的 `node_modules`——主树上正跑着的 dev server
+当场被换库。做法：`rm <wt>/frontend/node_modules`（删的是链接本身，别加 `-r`、别带尾斜杠）→
+`cp -a <主仓>/frontend/node_modules <wt>/frontend/node_modules`（约 720MB，实测一分钟内；
+`cp: chflags ... Too many levels of symbolic links` 是 `.bin/` 里的相对 symlink 在抱怨，无害，`.bin/next` 照样可解析）。
+`.venv` 这边已有 `--copy-venv`；node_modules 目前没有对应开关，手动 cp。
+
+> 实证（2026-09-15，织锦 Next 16.2.10→16.3.5）：主树 dev server 是并行线的（别杀），在用主仓 node_modules，
+> 升级只能在 worktree 里做。拷贝后 `npm install` / `npm audit fix` / build / vitest / e2e 全在副本上跑，
+> 主树 node_modules 一个字节没动。合入后主树 node_modules 与 lock 不一致是**预期状态**——下次重启 dev 前
+> `npm install`；在此之前旧版 `next dev` 会把 `AGENTS.md` 改回旧措辞，树会脏，无害。
 
 ## 三、什么时候不该用 worktree
 
