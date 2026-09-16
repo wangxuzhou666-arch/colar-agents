@@ -42,6 +42,7 @@ echo $?                                          # 0=全 pass，1=有 FAIL（可
 - **全量 ~16 Opus calls 有真实 token 成本**，改单 agent 只跑该 agent（`--agent`），smoke 用 `--case`。别随手跑全套。
 - **implementer 类（senior-developer）validity caveat**：纯 `claude -p` 无工具沙盒会让 implementer 退回"描述计划"而非贴代码；`sd-` 实现 case 已用「显式声明无工具→直接贴代码」修，degradation-probe `sd-no-architect-overreach` 两种环境都 valid。bare 实现 prompt 在此 FAIL 多半是环境错配不是 prompt 退化——别据此回退生产 prompt。
 - **master 是 symlink → 部署**，改 master 即时生效且 eval 读的就是 master，无需 sync。
+- **别把「先去读某文件」写成 agent prompt 的第 0 步**（2026-09-15 实证，code-reviewer 3/4 → 1/4）：单轮 eval 沙盒只截到那一个 tool call 就结束，agent 还没开始干活就被判分，**看起来像 prompt 退化，实际是 prompt 把自己的第一轮花掉了**。生产环境里同样是一轮纯开销。两个正确姿势：① 调用方把文件内容喂进 prompt（`/code-review` 就是这么接的）；② 把要点**内联成摘要**写进 agent 正文，再补一句「第一轮就出结果、别花一轮去加载」。改法实证有效：code-reviewer 回到 4/4、senior-developer 3/4 = baseline。
 - **degradation-probe 用 majority-of-3，别信单跑**：probe case 的 verdict 受 agent 输出非确定性影响会偶发翻车（实测 `sd-no-architect-overreach` 同 prompt 单跑 PASS↔FAIL）。判 probe 通过/回归用 `--case <probe-id>` **跑 3 次取多数票**，单次 PASS/FAIL 不作数。普通 case 单跑即可。
 
 ## 变异来源辨析（抖了先归因再动手）
