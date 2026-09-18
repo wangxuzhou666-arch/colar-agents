@@ -57,13 +57,14 @@ This is the identity layer (SOUL) — **axioms only**. Project workflow lives in
 
 **机械坑一律走 hook，文本杠杆对它们实测无效（2026-09-13 改写）**：从织锦 379 份 handoff 落盘提取 1928 条坑做跨时间聚类，**周重踩率 5–18%、两个月零下降趋势**；重踩最狠的几条当时就明明白白写在 SOUL 本节（「路径一律用绝对路径」）和 fabric-loop Pitfalls 里，照踩不误，其中一条 handoff 还留着自供「fabric-loop 早写过，又踩」。判据：**机械的（每 session 都成立、与任务无关、零歧义）→ 必须 hook 硬拦；判断的 → 才留文本**。往任何 SKILL/SOUL 加一条坑之前先过这道判据。
 
-当前机械层覆盖：「改前先 Read」由 `edit_read_guard` 拦；「shell 读文件」由 `tool_discipline_nudge` 拦；**路径/glob/venv/退出码/分词五类由 `scripts/hooks/bash_pitfall_guard.sh` 拦**（裸 `--include=*.py` · `(console)`/`[id]` 括号路径裸奔 · 系统 python3 跑 pytest · 相对 `.venv/bin/` · 管道后判 `$?` · 列表型 `$(cmd)` 赋值后裸 `$VAR` 当参数（zsh 不分词）；判别力自证测试在 `scripts/hooks/tests/`，改规则先跑它）。下面前两条（ToolSearch / payload 拆小）仍是纯文本杠杆，尚无 hook 兜底。
+当前机械层覆盖：「改前先 Read」由 `edit_read_guard` 拦；「shell 读文件」由 `tool_discipline_nudge` 拦；**路径/glob/venv/退出码/分词五类由 `scripts/hooks/bash_pitfall_guard.sh` 拦**（裸 `--include=*.py` · `(console)`/`[id]` 括号路径裸奔 · 系统 python3 跑 pytest · 相对 `.venv/bin/` · 管道后判 `$?` · 列表型 `$(cmd)` 赋值后裸 `$VAR` 当参数（zsh 不分词）；判别力自证测试在 `scripts/hooks/tests/`，改规则先跑它）。**「主 loop 连读 ≥6 个文件未改任何东西」+「context 过 500K 硬上限」两条由 `explore_read_nudge` 软提示**——注意它是 UserPromptSubmit 注入、不拦截（该不该派 agent / 该不该切 session 都是判断类，硬拦会误伤；它只把机械事实摆出来）。**低 context 阈值（200K）刻意不设**：起手基线就 55-70K、调研读三个大文件即 190K，那时催 handoff 是纯亏——盯因（连读不改）不盯果（已经膨胀）。下面前两条（ToolSearch / payload 拆小）仍是纯文本杠杆，尚无 hook 兜底。
 度量：`python3 ~/Desktop/colar-agents/scripts/handoff_repeat_rate.py <repo>` 出重踩率；**baseline 8.2%（2026-09-13，hook 上线前）**。重踩率降不下去 = 上一轮选错了该升级的对象。
 
 - **Deferred 工具先 ToolSearch 再调**：`TodoWrite` / `AskUserQuestion` / `WebFetch` / `WebSearch` 等 deferred 工具的 schema 默认不在 context 里，凭记忆猜参数名会翻车。**调用前先 `ToolSearch "select:<name>"` 拉 schema，按真实字段填**。（注：这条治的是那 5%，别因为遵守了它就以为安全——真正高频的是下一条。）
 - **payload 拆小（覆盖 95% 失败的那条）**：`AskUserQuestion` 单次 ≤2 问、每问 ≤4 选项；其他工具同理，宁可多轮调用也别一次塞爆。**没有安全字节数阈值**——2026-08-05 复核推翻了旧的「>1.5KB 才危险」说法（失败中位数约 1KB，67% 在 1.5KB 以下），所以不要拿"我这个不大"当理由。结构越简单、嵌套越浅、特殊字符越少越安全。
 - **路径一律用绝对路径**：裸 home lane 的 cwd 是 `/Users/colar`，项目却在 `~/Desktop/<project>/`——相对路径必 ENOENT（审计：文件不存在错 32 次多为此，典型是 cwd 已在某个项目子目录、却按另一处的相对路径去找）。Bash `cd`、文件工具 `file_path`、跨 lane 操作全用绝对路径，不赌 cwd。
 - **改文件前必先 Read**：Edit/Write 前用 Read 工具读过目标（head/cat/sed 不算，harness 只认 Read）；否则 `edit_read_guard` hook 直接 exit 2 拦截（审计：edit-before-read 63 次，最高频自伤）。
+- **主 loop 只做薄编排，执行派出去**：主 loop **不读大文件 · 不写代码正文**；subagent 只回传结论 + 路径 + 关键摘要，不回传全文。机制是主 loop context **每轮全量复读**——大 payload 进来一次，之后每轮都在为它付费（成本近 O(N²)）；subagent context 一次性用完即弃。**要事实就派 agent 拿结论，别自己堆 Read。** 判据不是「这操作机不机械」而是「这子任务有没有信息压缩比」：读 20 个文件回传 2K 结论极划算；读 1 个文件原样回传纯亏（还多付 agent 启动基线）。2026-09-18 实测：Agent 派发率 **0.26%**（45 次派发 / 17049 次工具调用）、主 loop 吃 **83.1%** 成本、context >300K 的 session 占 **93.9%** 开销、session 起手基线 55-70K。完整版见 memory `feedback_fable_thin_orchestrator_model_routing.md`（2026-07-03 就写下三条铁律，但 SOUL 一直无 pointer → 两个半月零执行，是「规则触达不到执行点」的标本）。
 
 ## Output Handling
 

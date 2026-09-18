@@ -10,7 +10,9 @@
 #   ./run-eval.sh                       # run all covered agents
 #   ./run-eval.sh --agent code-reviewer # run one agent only (cheaper)
 #   ./run-eval.sh --agent code-reviewer --case cr-sql-injection  # one case (smoke)
-#   ./run-eval.sh --model claude-opus-4-8   # override model
+#   ./run-eval.sh --model claude-sonnet-5   # override the AGENT's model only;
+#                                           # the judge stays on the baseline model
+#   ./run-eval.sh --judge-model <id>        # re-base the judge (rarely; invalidates BASELINE)
 #
 # Exit code: 0 if all (non-ERROR) cases pass, 1 if any case fails.
 # ERROR cases (infra failures) do NOT flip the exit code by themselves but are
@@ -30,6 +32,14 @@ JUDGE_PROMPT_FILE="$SCRIPT_DIR/judge-prompt.md"
 # Opus measures a model Colar no longer uses. (2026-08-04: claude-opus-4-8 -> claude-opus-5;
 # pass rates from before this date are NOT comparable — baseline was rebuilt.)
 MODEL="claude-opus-5"
+
+# The judge's model is deliberately SEPARATE from the agent's and defaults to the
+# baseline model regardless of --model. The ruler must not move with the thing
+# being measured: when a single var drove both, `--model claude-sonnet-5` scored
+# "sonnet written, sonnet judged" against a "opus written, opus judged" baseline,
+# so a pass-rate delta could not be attributed to the agent side at all. Only
+# change this when deliberately re-basing the judge, and re-run BASELINE if so.
+JUDGE_MODEL="claude-opus-5"
 
 # Map agent slug -> master .md file (relative to repo root).
 # Keep this in sync with the deployed roster (~/.claude/agents/) — an agent with
@@ -58,6 +68,7 @@ while [[ $# -gt 0 ]]; do
     --agent) ONLY_AGENT="$2"; shift 2 ;;
     --case)  ONLY_CASE="$2"; shift 2 ;;
     --model) MODEL="$2"; shift 2 ;;
+    --judge-model) JUDGE_MODEL="$2"; shift 2 ;;
     -h|--help)
       grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "Unknown arg: $1" >&2; exit 2 ;;
@@ -150,7 +161,7 @@ EOF
               --system-prompt-file "$JUDGE_PROMPT_FILE" \
               --tools "" \
               --output-format json \
-              --model "$MODEL" </dev/null 2>/dev/null)" || { continue; }
+              --model "$JUDGE_MODEL" </dev/null 2>/dev/null)" || { continue; }
     # Outer claude envelope -> .result holds the judge's text (control-char safe).
     inner="$(printf '%s' "$raw" | extract_result)" || continue
     [[ -z "$inner" ]] && continue
@@ -202,7 +213,7 @@ cleanup() { for f in "${TMP_FILES[@]:-}"; do [[ -f "$f" ]] && rm -f "$f"; done; 
 trap cleanup EXIT
 
 echo "============================================================"
-echo " Agent Eval Harness  (model: $MODEL)"
+echo " Agent Eval Harness  (agent: $MODEL | judge: $JUDGE_MODEL)"
 echo "============================================================"
 
 for agent in "${AGENTS[@]}"; do

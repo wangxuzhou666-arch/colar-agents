@@ -5,9 +5,67 @@ rates but stores nothing, so without this file "compare before/after" relies on
 remembering a number from a previous session. Update it whenever a run changes
 the expected result **and you have decided the new result is correct**.
 
+## 2026-09-18 — judge model split + senior-developer moved to sonnet
+
+### Harness fix (do not undo)
+
+`--model` used to drive **both** the agent call and the judge call from one
+`$MODEL` var, so `--model claude-sonnet-5` scored "sonnet written, sonnet judged"
+against an "opus written, opus judged" baseline — the ruler moved with the thing
+being measured, and no pass-rate delta could be attributed to the agent side.
+The judge now has its own `JUDGE_MODEL`, pinned to `claude-opus-5` regardless of
+`--model`. Override only via the explicit `--judge-model`, and re-run the whole
+baseline if you ever do.
+
+### A/B result — senior-developer
+
+| Config | Result |
+|---|---|
+| agent `opus-5`, judge `opus-5` (baseline, re-run) | 4/4, every case score 5 |
+| agent `sonnet-5`, judge `opus-5` | 4/4, every case score 5 |
+| `sd-no-architect-overreach` probe on sonnet, majority-of-3 | 3/3 PASS, no flapping |
+
+The opus row was re-run rather than read off the 2026-08-04 table below, because
+`agent-prompt-edit-gate` records a 2026-09-15 prompt change after which
+senior-developer sat at 3/4 — comparing against a stale number would have
+charged that drift to the model swap.
+
+`engineering-senior-developer.md` is now `model: sonnet`. Everything else stays
+on opus; the judgement-layer agents (code-reviewer, applied-ai, agent-infra) were
+deliberately left alone — cheaper judgement means a looser verification gate,
+which is a bad trade at any price.
+
+### What this eval does NOT establish
+
+Every case runs with `--tools ""`, single-turn, 4 cases total. That measures
+one-shot text quality. The execution layer's real work is a multi-turn tool loop
+(Read → reason → Edit → verify), and **none of that was tested**. The honest
+claim is "no measurable regression", not "proven equivalent".
+
+### Revert triggers (any one → put `model: opus` back)
+
+- A subagent's output needs the main loop to redo it (rework, not review).
+- `/code-review` findings on sonnet-produced diffs rise noticeably.
+- Subagents report done while build/test is red, more often than before.
+
+### Field notes — real-workload observations
+
+The eval above cannot settle whether sonnet holds up in a multi-turn tool loop;
+only real use can. Append one line per observation as it happens, good or bad —
+a run of clean entries is as much evidence as a failure is. Date every entry.
+
+| Date | Observation | Verdict |
+|---|---|---|
+| 2026-09-18 | Switched. No workload yet. | — |
+
+Reverting is one line of frontmatter. Track the behavioural side with
+`scripts/orchestration_audit.py`; the 2026-09-18 reading this was decided
+against: Agent dispatch rate 0.26%, main loop 83.1% of cost, sessions above 300K
+context carrying 93.9% of spend.
+
 ## Current baseline — 2026-08-04
 
-- Model: `claude-opus-5`
+- Model: `claude-opus-5` (agent side; judge is pinned separately since 2026-09-18)
 - Harness: tool-isolated (`--tools ""` on both the agent and judge calls)
 - Full run: 22 cases / 44 `claude` calls
 
