@@ -56,7 +56,8 @@ a run of clean entries is as much evidence as a failure is. Date every entry.
 
 | Date | Observation | Verdict |
 |---|---|---|
-| 2026-09-18 | Switched. No workload yet. | — |
+| 2026-09-18 | Switched to sonnet. | — |
+| 2026-09-18 | First real task: wrote `scripts/verify_orchestration_setup.sh` (7 checks over settings.json, hook behaviour, frontmatter parsing, SOUL). Ran green; independently re-run by the main loop, same result. Volunteered that check 6 is structurally coupled to `run_judge()`'s name and brace layout, and that it fails loudly rather than passing silently if that changes. Also noticed the hook file was edited mid-task, read the diff, and confirmed it did not touch the path under test. Verified as sonnet-5 in the transcript. | Good — unprompted disclosure of its own limits is the behaviour a cheaper model is most likely to drop, and it did not. |
 
 Reverting is one line of frontmatter. Track the behavioural side with
 `scripts/orchestration_audit.py`; the 2026-09-18 reading this was decided
