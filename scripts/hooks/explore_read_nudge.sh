@@ -96,7 +96,24 @@ if ctx >= ceiling:
           f"任务一到断点就 /handoff 换 session（或 /compact 就地压缩）。"
           f"这不是早期误报区间：起手基线才 55-70K。")
 
-if reads >= threshold:
+# 去重：同一段连读会跨多轮 prompt 存在（没新 Read 也没 Edit 时计数不变），
+# 不去重就每轮重复喊同一句 —— 噪音会让人开始无视所有 hook 提示，比没有 hook 更糟。
+# 只在 reads 比上次提示时增加了才再喊；被 Edit 打断（reads 掉回阈值下）就清状态重新开始。
+state = os.path.join(os.environ.get("TMPDIR", "/tmp"),
+                     "claude-explore-nudge-" + os.path.basename(tp).replace(".jsonl", ""))
+last = 0
+if os.path.exists(state):
+    try:
+        last = int(open(state).read().strip())
+    except (ValueError, OSError):
+        last = 0
+
+if reads < threshold:
+    if os.path.exists(state):
+        os.remove(state)
+elif reads > last:
+    with open(state, "w") as f:
+        f.write(str(reads))
     sample = ", ".join(paths[:4])
     print(f"[explore-nudge::hook-only] 主 loop 已连读 {reads} 个文件未改任何东西（{sample}…）—— "
           f"这是探索性工作，内容会永久留在主 loop context 并在之后每一轮重付。"
