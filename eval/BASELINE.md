@@ -5,6 +5,83 @@ rates but stores nothing, so without this file "compare before/after" relies on
 remembering a number from a previous session. Update it whenever a run changes
 the expected result **and you have decided the new result is correct**.
 
+## 2026-09-19 — orchestration_audit.py accounting fixes + baseline rebase
+
+`scripts/orchestration_audit.py` had three accounting bugs, found while trying
+to explain 25.7h of zero triggers on `explore_read_nudge.sh` (was the audit
+tool's own numbers trustworthy, or was the hook actually not firing?):
+
+1. **Window filter was file-level only.** `scan()` skipped a whole `.jsonl` by
+   `mtime < cutoff` but never checked each record's own `timestamp` — a
+   long-lived session file touched today pulled its *entire* history (records
+   back to 09-12 observed) into a "last 1 day" read. Fixed: added a
+   per-record `timestamp` gate inside the loop, alongside the existing mtime
+   pre-filter (kept — it's still a safe perf skip of whole files, not the bug).
+   Records with a missing/malformed `timestamp` are **skipped, not counted**:
+   a "last N days" report should undercount rather than let unknown-date data
+   pass as recent. (0 records hit this path in the runs below.)
+2. **Dispatch rate mixed layers.** `tools[name] += 1` counted every layer
+   (main loop + subagent-internal), and the `"Agent"` match did too — so a
+   subagent's own nested dispatch inflated both the numerator and, via the
+   shared `tools` counter, the denominator of a ratio whose stated purpose is
+   "did the main loop delegate". Fixed: `main_tools` / `main_agents` counters
+   scoped to `side == "main"` only, both halves of the ratio now share that
+   scope. Nested dispatch is still surfaced, as a separate count, not folded
+   into the rate.
+3. **`"Agent"` only, not `"Task"`.** No observed impact in these runs (every
+   dispatch was named `Agent`) but the tool can be invoked under either name
+   — fixed to match both so this doesn't silently regress later.
+
+### Old vs new reading, same on-disk transcripts (run 2026-09-19)
+
+Old-methodology numbers came from re-running the pre-fix script
+(`git show HEAD~1:scripts/orchestration_audit.py` at the time of this commit)
+against the same transcripts, seconds apart from the new-methodology run —
+small run-to-run drift (a minute of new events, window edges shifting) is
+expected and not signal.
+
+| Window | Metric | Old 口径 | New 口径 |
+|---|---|---|---|
+| 1 day | main-loop cost share | 54.1% | 50.4% |
+| 1 day | Agent dispatch rate | 1.66% (28/1685, all layers) | 5.19% (23/443, main-loop only) |
+| 1 day | main-loop edits | 53 | 44 |
+| 1 day | sessions >300K, cost share | 74.7% | 75.6% |
+| 2 day | main-loop cost share | 73.5% | 70.0% |
+| 2 day | Agent dispatch rate | 1.35% (51/3784, all layers) | 1.87% (31/1657, main-loop only) |
+| 2 day | main-loop edits | 274 | 247 |
+| 2 day | sessions >300K, cost share | 83.0% | 85.6% |
+| 7 day | main-loop cost share | 81.4% | 79.5% |
+| 7 day | Agent dispatch rate | 0.44% (72/16436, all layers) | 0.49% (50/10223, main-loop only) |
+| 7 day | main-loop edits | 1622 | 1422 |
+| 7 day | sessions >300K, cost share | 92.2% | 92.5% |
+| 7 day | total cost, all layers | $15,636.74 | $14,186.40 (−9.3%) |
+
+Directional takeaways — three windows, do not over-read:
+
+- The 1-day dispatch rate jump (1.66% → 5.19%) is mostly bug #2: the
+  denominator shrinks once subagent-internal calls are excluded from it. This
+  is a **measurement correction**, not a behavior change.
+- Main-loop cost share drops a few points at every window once bug #1 stops
+  smuggling stale historical records into "recent" totals.
+- The >300K-session cost share — the number the explore-nudge ceiling cares
+  about — barely moves (74–93% either methodology). The zero-hook-trigger
+  question this rebase was meant to inform is **not** explained by these
+  accounting bugs; see the silent instrumentation added to
+  `scripts/hooks/explore_read_nudge.sh` for the next round of evidence.
+
+### 2026-09-18 baseline is retired
+
+The number quoted in `soul/SOUL.md` (`§ 主 loop 只做薄编排`) and in this
+file's Field notes table below — dispatch rate 0.26%, main-loop cost 83.1%,
+>300K sessions 93.9% of spend — was read with the pre-fix script and **is not
+comparable** to anything produced after this commit (bugs #1–#2 both bias
+that specific reading). Treat the table above as the current baseline for
+`orchestration_audit.py`; re-run `python3 scripts/orchestration_audit.py
+<days>` for a fresh number rather than diffing against the retired one.
+`soul/SOUL.md` embeds the old number as a fact, not an axiom — flagged for
+Colar to update or route through `/save-memory`, not edited here (SOUL edits
+need sign-off per this repo's own SOUL ↔ Memory Sync Discipline).
+
 ## 2026-09-18 — judge model split + senior-developer moved to sonnet
 
 ### Harness fix (do not undo)
