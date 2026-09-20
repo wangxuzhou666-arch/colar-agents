@@ -1,12 +1,21 @@
 #!/usr/bin/env bash
-# PostToolUse(Write|Edit) guard —— 检测刚写入的文本文件是否混入 NUL 字节(0x00)。
+# PostToolUse(Write|Edit|MultiEdit) guard —— 检测刚写入的文本文件是否混入 NUL 字节(0x00)。
 #
 # 背景:Write 工具的 \u00xx 转义求值坑会把字面 NUL 写进文件
 #   (见 memory feedback_write_tool_unicode_escape_nul.md),文件表面正常,
 #   下游 git / 编辑器 / 解析器把它当二进制,静默炸。写完立刻检出 → 让模型当场修。
 #
+# ⚠️ 接线坑(2026-09-20 实测发现):本 guard 此前被接在 PreToolUse,而它扫的是磁盘上的
+#       文件内容、不是 payload —— Pre 阶段读到的是【写入前】的旧内容:新建时文件还不存在
+#       → fail-open 直接放过;覆盖写时扫到的是旧内容 → 新写进去的 NUL 检测不到。
+#       它要防的正是 Write 新建/覆盖,这两种在 Pre 下全部失效 → 必须接 PostToolUse。
+#
 # 机制:stdin JSON 取 tool_input.file_path;扩展名白名单内的文本文件扫 0x00,
 #       命中 → exit 2 + stderr(反馈给模型);否则 exit 0。
+#       PostToolUse 的 tool_input 形状与 PreToolUse 一致(2026-09-20 实测:Write 收到
+#       {file_path, content},Edit 收到 {file_path, old_string, new_string, replace_all}),
+#       故迁移后取字段的写法无需改动。PostToolUse 的 exit 2 撤销不了已发生的写入,
+#       但 stderr 会回灌给模型 → 当场重写修复,这正是本 guard 的设计意图。
 # fail-open:stdin 解析异常 / 文件不存在 / 读失败 / 任何不确定 → exit 0,绝不阻断。
 #       二进制文件按扩展名白名单跳过(只扫 .md .txt .json .js .ts .tsx .py .sh
 #       .yaml .yml .toml .css .html),文件读取上限 20MB 兜性能底。
