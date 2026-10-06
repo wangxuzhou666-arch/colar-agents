@@ -95,6 +95,21 @@ if [ -z "$suggest" ]; then
   fi
 fi
 
+# ---- 规则 7：未加花括号的 $NAME:<字母> 被 zsh 当修饰符吃掉 ----
+# "refs/heads/$b:refs/heads/$b" 里的 :r（去扩展名）被吞，展开成 refs/heads/feat/xefs/heads/feat/x，
+# 双引号里也照吃。实证 2026-10-06：15 次 git push 全败。
+# 判定在同目录 zsh_modifier_check.py（要认单引号 / 反斜杠，bash 正则写不清）；判定器缺失或异常一律放行。
+if [ -z "$suggest" ]; then
+  modifier_checker="$(dirname "${BASH_SOURCE[0]}")/zsh_modifier_check.py"
+  if [ -f "$modifier_checker" ]; then
+    modifier_hit=$(printf '%s' "$cmd" | python3 "$modifier_checker" 2>/dev/null | head -n 1 || true)
+    if [ -n "$modifier_hit" ]; then
+      read -r modifier_name modifier_letter <<< "$modifier_hit"
+      suggest="zsh 把未加花括号的 \$${modifier_name}:${modifier_letter} 里的 :${modifier_letter} 当修饰符吃掉（双引号里也照吃；2026-10-06 实测 \"refs/heads/\$b:refs/heads/\$b\" 展开成 refs/heads/feat/xefs/heads/feat/x，15 次 push 全败）。写 \${${modifier_name}}:${modifier_letter}… ；若本意就是用修饰符，写 \${${modifier_name}:${modifier_letter}}"
+    fi
+  fi
+fi
+
 [ -z "$suggest" ] && exit 0
 
 reason=$(printf '%s' "⛔ pitfall-guard: $suggest" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))' 2>/dev/null || true)

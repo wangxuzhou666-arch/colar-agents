@@ -4,6 +4,9 @@
 # 跑法：bash scripts/hooks/tests/test_bash_pitfall_guard.sh
 # 变异验证：GUARD=<改坏一条规则的副本> bash 本脚本 → 该规则的正例必须转红，否则用例没有判别力。
 #
+# 规则 6 / 7 的判定器（zsh_wordsplit_check.py / zsh_modifier_check.py）按 guard 自身所在目录查找，
+# 所以变异时要把 guard 副本和两个 .py 一起拷进同一个临时目录，再改其中一个。
+#
 # 每条规则至少 2 正 2 反，反例优先覆盖规则本身明写的放行例外（venv 绝对路径、cd 锚定、引号等），
 # 因为那些例外才是最容易被后来人"顺手收紧"改坏的部分。
 set -u
@@ -106,6 +109,30 @@ expect_allow "R6 setopt shwordsplit 已开"      "setopt shwordsplit; FILES=\$(f
 expect_allow "R6 [ -n \$FILES ] 不吃列表"      "FILES=\$(find src -name '*.py'); [ -n \$FILES ] && echo ok"
 expect_allow "R6 here-string <<< \$FILES"      "FILES=\$(git ls-files '*.py'); while read -r f; do wc -l \$f; done <<< \$FILES"
 expect_allow "R6 只赋值不消费"                 "FILES=\$(find src -name '*.py'); COUNT=\$FILES"
+
+# ---- 规则 7：未加花括号的 $NAME:<字母> 被 zsh 当修饰符吃掉 ----
+# 正例钉 '${b}:r' 是为了同时验证 NAME / 字母 的提取与提示里的修法，不只是"被拦了"。
+# 正例 1 = 2026-10-06 事故原句（:r 吞掉扩展名，15 次 push 全败）
+expect_deny  "R7 原始事故 refs/heads/\$b:refs/heads/\$b" "git push origin \"refs/heads/\$b:refs/heads/\$b\"" '${b}:r'
+expect_deny  "R7 循环里的同一句"               "for b in feat/x feat/y; do git push origin \"refs/heads/\$b:refs/heads/\$b\"; done" '${b}:r'
+expect_deny  "R7 裸（无引号）\$dir:h"          "cd \$dir:h && ls"                                   '${dir}:h'
+expect_deny  "R7 下划线开头的名字 \$_tag:e"    "echo \"\$_tag:extra\""                              '${_tag}:e'
+expect_deny  "R7 双引号里的撇号不开单引号"     "echo \"it's \$b:r\"; echo 'x'"                      '${b}:r'
+expect_deny  "R7 单引号段之后的裸 \$b:t"       "awk '{print \$1}' f; echo \$b:t"                    '${b}:t'
+expect_allow "R7 \${b}: 已加花括号"            "git push origin \"refs/heads/\${b}:refs/heads/\${b}\""
+expect_allow "R7 \$HOST:\$PORT"                "curl \$HOST:\$PORT/health"
+expect_allow "R7 \$HOST:8080"                  "curl \$HOST:8080/health"
+expect_allow "R7 PATH=\$PATH:/usr/bin"         "export PATH=\$PATH:/usr/bin"
+expect_allow "R7 \"\$a\":rest 引号先于冒号收口" "echo \"\$a\":rest"
+expect_allow "R7 \$1:x 位置参数"               "echo \$1:x \"\$2:y\""
+expect_allow "R7 \$b: 冒号后跟空格"            "echo \"\$b: running\""
+expect_allow "R7 \${b:-x} 默认值语法"          "echo \"\${b:-x}\""
+expect_allow "R7 \${arr[@]} 数组展开"          "for x in \"\${arr[@]}\"; do echo \"\${x}:ok\"; done"
+expect_allow "R7 \\\$ 转义的美元符"            "echo \"\\\$b:r\""
+expect_allow "R7 单引号 awk \$NF\":\"\$2"      "awk '{print \$NF\":\"\$2}' f"
+expect_allow "R7 单引号 perl 脚本里的 \$x:r"   "perl -e 'print \$x:r'"
+expect_allow "R7 单引号 sed 脚本里的 \$x:h"    "sed 's/\$x:h/y/' f"
+expect_allow "R7 单引号不平衡则放行不猜"       "echo 'unterminated \$b:r"
 
 echo "PASS $pass / FAIL $fail"
 [ "$fail" -eq 0 ]
