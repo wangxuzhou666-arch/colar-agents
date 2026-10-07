@@ -68,7 +68,10 @@
 2. "以后可能扩展"不是理由；**第三次重复**才是抽的时机。
 3. 一次性需求不造 config 层 / 插件机制 / 注册表。
 4. 泛名黑名单：`data / result / info / tmp / manager / handler / util` 不带限定词不许用（要 `token_ids` / `decode_result` / `order_handler`）。
-5. 对称对不混用：`start/stop` `begin/end` `open/close` `send/recv`（不出现 `start/finish`）。bool 前缀 `is_ / has_ / should_ / can_`（机械拦：`: bool` 注解 / bool 字面量默认值或赋值的名字；惯用旗标 `dry_run / verbose / debug / force / strict / quiet` 豁免；**`use_` 只给 React hooks，Python 里不出现**）。
+5. 对称对不混用：`start/stop` `begin/end` `open/close` `send/recv`（不出现 `start/finish`）。
+   **bool 命名走判断档（reviewer），不再机械拦**（2026-10-06 由「bool 必须带 `is_ / has_ / should_ / can_` 前缀」降级）：一个 bool 的名字**读起来像非 bool 的名词 / 动词**（`timeout` / `write` / `real` / `conflict`——读者会当成数值 / 对象 / 动作）必须改（`should_timeout` / `is_write_mode` / `is_real` / `has_conflict`）；读来无歧义的过去分词 / 形容词 / 惯用旗标（`truncated` / `include_derived` / `*_ok` / `dry_run / verbose / debug / force / strict / quiet`）不需要前缀，**别为凑前缀报 finding**。
+   **`use_` 仍机械拦**：`use_` 只给 React hooks，Python 里不出现（`: bool` 注解 / bool 字面量默认值或赋值里的 `use_x`，由 pre-commit 风格门 USE_PREFIX 拦）。
+   降级依据（织锦 `--all` 实测，数字在 `scripts/check_style_diff.py` 文件头）：多数 bool 名本来就没前缀、命中里绝大多数是无歧义惯用词；检测是机械的，但「这个名字会不会被读错」是判断——不满足 §0 的零歧义判据。
 
 ## P3 · 注释：写 why，不写 what
 
