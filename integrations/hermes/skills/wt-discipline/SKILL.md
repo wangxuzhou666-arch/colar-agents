@@ -1,7 +1,7 @@
 ---
 name: wt-discipline
 description: "用 git worktree 做隔离验证/部署/并行分支时的纪律 —— 一律走 `wt` 包装脚本（scripts/wt），落点固定 ~/.wt/<repo>-<用途>，绝不 cd 进 worktree、绝不把要留存的产物写在 worktree 里。治六类实证踩坑：cwd 悬空后满屏 ENOENT · /tmp↔/private/tmp 别名让 remove 失配 · 防御式 rm -rf+prune 仪式 · 产物随 worktree 蒸发（部署史丢过一条）· 落点四处开花 · .venv/node_modules 每次手搭 · 不进 git 的本地产物实测十三样、逐个撞门（素材/node_modules/.venv/种子库/.env/子服务 node_modules/部署史/四个快照记录；一棵新 worktree 跑不绿全量门是构造使然；缺 .env 时门不红但读数悄悄变；.venv 用 symlink 会让 rsync --delete 删掉服务器真实目录；活 sqlite 要用 .backup 不是 cp）· symlink 挂的 .venv 若有 editable install 会让「干净树验证」静默变成在量脏主树 · worktree 只上线 HEAD 造成「本地改了线上没变」。Use when: creating a throwaway worktree to verify a build/test at a specific ref, running a clean-tree deploy, working two branches in parallel, or debugging \"worktree remove 删不掉 / 目录已存在 / No such file or directory / 部署记录不见了 / 干净树上一堆无关测试红\"."
-version: 1.4.0
+version: 1.5.0
 source: session-derived (2026-08-18)。全量扫 5297 个 session、200 个含真实 git worktree 操作的会话、288 次调用统计得出；六类失败模式均有现场证据。v1.1.0 (2026-08-19)：织锦一次干净部署实战补第四、五节——三样不进 git 的必补产物（素材/node_modules/.venv）、.venv 用 symlink 会触发 rsync --delete 删服务器真实目录、worktree 只上线 HEAD 导致「本地改了线上没变」。v1.2.0 (2026-09-11)：织锦一次「在干净树上还 check_all 的债」实战——第四样产物（种子库 `data/*.db`，缺了会让十几条无关测试红）、活 sqlite 用 `sqlite3 .backup` 而非 `cp`（2.1GB 实测 3.3s，有并发写仍一致）、以及 symlink 挂 `.venv` 时必须先自证 import 解析到 worktree（否则整轮验证在量主树）。v1.3.0 (2026-09-11，同一轮继续撞)：第四节重写——**一棵新 worktree 跑不绿全量门是构造使然**，按「范围验证（前四样）/ 门级判决（十三样）」分档；补 `.env`（唯一缺了不报错、只让读数悄悄变的一样，symlink 不 cp）、子服务 node_modules、`.deploy-history.jsonl`、四个快照记录；方法论教训：开工前把门的每一道读一眼就能一次列全，逐轮撞要付每轮 6 分半的 pytest。v1.3.1：再补一类不在产物清单里的假红——拿 mtime 当新鲜度判据的门（checkout 会把 mtime 刷成当下），认出来跳过即可。同轮订正了一个错判：我曾因「库 2GB 且在被写」就断言干净树跑不了全量并写进 commit message，实为没想到 `.backup`。v1.3.2 (2026-09-15)：第二节补第四条铁律——要在 worktree 里改依赖，`frontend/node_modules` 必须真实拷贝而非 `wt new` 默认的 symlink（织锦 Next 16.2.10→16.3.5 实证：symlink 下 `npm install` 写的是主仓的库，会当场换掉并行线 dev server 正在用的 node_modules）。
 ---
 
@@ -15,7 +15,9 @@ worktree 的价值是**在不扰动主工作树的前提下拿到某个 ref 的�
 ## 一、命令
 
 ```bash
-wt new <用途> [ref]     # 建到 ~/.wt/<repo>-<用途>，默认 detach，自动继承 .venv / node_modules
+wt new <用途> [ref]     # 建到 ~/.wt/<repo>-<用途>，默认 detach（ref 默认 HEAD），自动继承 .venv / node_modules
+wt new <用途> --branch <名>   # 开发分支：不给 ref 时先 fetch，再从 origin 默认分支切（--no-track），不叠在当前分支上
+                              # 显式给 ref（含 HEAD）照用；仓里有 scripts/wt-post-new.sh 就自动跑（补本地产物），--no-hook 跳过
 wt run <用途> <命令...> # 在 worktree 里跑；调用方 cwd 不动
 wt ls                   # 一屏看全：净 / 脏 / 悬空 / 不在 ~/.wt
 wt rm <用途>            # 拆；有未提交内容会拒绝并摊开给你看，要丢得显式 --force
