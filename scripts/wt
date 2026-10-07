@@ -4,9 +4,12 @@
 # Usage:
 #   wt new <用途> [ref]        建 worktree 到 ~/.wt/<repo>-<用途>（ref 默认 HEAD，detached）
 #        --branch <name>       建新分支而不是 detach
-#        --no-env              不继承 .venv / node_modules
+#        --no-env              不继承 .venv / node_modules（不影响下面的仓库钩子）
 #        --copy-venv           拷贝 .venv 而不是 symlink（需要就地改依赖时用）
-#   wt ls                      列出本仓所有 worktree，标注 脏 / 悬空 / 不在 ~/.wt
+#        --no-hook             不跑仓库钩子。默认：新树里有 scripts/wt-post-new.sh 就在环境继承后跑
+#                              `bash scripts/wt-post-new.sh <主仓根> <新树路径>`（cwd=新树）；
+#                              钩子失败只警告，不拆树、不改 wt 退出码
+#   wt ls                     列出本仓所有 worktree，标注 脏 / 悬空 / 不在 ~/.wt
 #   wt rm <用途|路径>          拆掉；有未提交改动会**拒绝**并列出来，要显式 --force
 #   wt run <用途> <cmd...>     在 worktree 内跑命令（子 shell，调用方 cwd 绝不进去）
 #   wt path <用途>             打印规范化后的绝对路径
@@ -73,17 +76,18 @@ cmd_path() { [ $# -ge 1 ] || die "用法: wt path <用途>"; wt_path_of "$1"; }
 cmd_main() { main_root; }
 
 cmd_new() {
-    local purpose="" ref="" branch="" no_env=0 copy_venv=0
+    local purpose="" ref="" branch="" no_env=0 copy_venv=0 no_hook=0
     while [ $# -gt 0 ]; do
         case "$1" in
             --branch)    branch="${2:?--branch 需要分支名}"; shift 2 ;;
             --no-env)    no_env=1; shift ;;
             --copy-venv) copy_venv=1; shift ;;
-            -*)          die "wt new: 未知参数 $1" ;;
+            --no-hook)   no_hook=1; shift ;;
+            -*)          die "wt new: 未知参数 ${1}（可用：--branch <name> --no-env --copy-venv --no-hook）" ;;
             *)           if [ -z "$purpose" ]; then purpose=$1; else ref=$1; fi; shift ;;
         esac
     done
-    [ -n "$purpose" ] || die "用法: wt new <用途> [ref] [--branch <name>] [--no-env|--copy-venv]"
+    [ -n "$purpose" ] || die "用法: wt new <用途> [ref] [--branch <name>] [--no-env|--copy-venv] [--no-hook]"
     case "$purpose" in */*) die "wt new: <用途> 是名字不是路径（会落到 $WT_HOME/<repo>-<用途>）" ;; esac
 
     local root path
@@ -125,6 +129,20 @@ cmd_new() {
                 ln -s "$root/$nm" "$path/$nm" && echo "wt: $nm → symlink"
             fi
         done
+    fi
+
+    # 仓库级 post-new 钩子：「新树还缺什么」（.env / 种子库 / 子服务依赖……）是项目知识，由仓库自己声明，
+    # wt 不内置。钩子失败只警告：树已经建好了，拆掉反而丢掉排查现场。
+    # env -u：钩子会起 git / 测试子进程，绝不让调用方漏进来的 GIT_DIR 一类变量继承下去
+    # （2026-10-06 织锦实测：继承的绝对 GIT_DIR 把测试里的 git config 写进了真仓）。
+    if [ "$no_hook" -eq 0 ] && [ -f "$path/scripts/wt-post-new.sh" ]; then
+        echo "wt: 跑仓库钩子 scripts/wt-post-new.sh"
+        local hook_rc=0
+        ( cd "$path" && env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE \
+            bash scripts/wt-post-new.sh "$root" "$path" ) || hook_rc=$?
+        if [ "$hook_rc" -ne 0 ]; then
+            echo "wt: 警告 —— scripts/wt-post-new.sh 失败（exit ${hook_rc}），worktree 已保留；修好后补跑：wt run $purpose bash scripts/wt-post-new.sh \"$root\" \"$path\"" >&2
+        fi
     fi
 
     echo "wt: 就绪 $path  ($(git -C "$path" rev-parse --short HEAD))"
