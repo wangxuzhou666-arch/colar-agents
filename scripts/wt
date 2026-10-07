@@ -3,7 +3,9 @@
 #
 # Usage:
 #   wt new <用途> [ref]        建 worktree 到 ~/.wt/<repo>-<用途>（ref 默认 HEAD，detached）
-#        --branch <name>       建新分支而不是 detach
+#        --branch <name>       建新分支而不是 detach。此时不给 ref → 默认从 origin 的默认分支切：先 fetch，
+#                              取 origin/HEAD 指向（再试 origin/main、origin/master），都没有退回 HEAD 并警告；
+#                              新分支不跟踪上游。显式给 ref（含 HEAD）一律照用。R2：不叠在别线未合并分支上
 #        --no-env              不继承 .venv / node_modules（不影响下面的仓库钩子）
 #        --copy-venv           拷贝 .venv 而不是 symlink（需要就地改依赖时用）
 #        --no-hook             不跑仓库钩子。默认：新树里有 scripts/wt-post-new.sh 就在环境继承后跑
@@ -75,6 +77,28 @@ wt_path_of() {
 cmd_path() { [ $# -ge 1 ] || die "用法: wt path <用途>"; wt_path_of "$1"; }
 cmd_main() { main_root; }
 
+# --branch 不给 ref 时的默认基：origin 的默认分支。主树常停在某条功能分支上，若沿用 HEAD，
+# 新分支就叠在别线未合并的提交上（织锦 R2 明令禁止）。stdout 只吐 ref，说明一律走 stderr。
+default_branch_base() {
+    local root=$1 cand
+    if ! git -C "$root" remote get-url origin >/dev/null 2>&1; then
+        echo "wt: 警告 —— 仓库没有 origin，--branch 退回从 HEAD 切（可能叠在别线分支上）" >&2
+        echo HEAD; return
+    fi
+    # GIT_TERMINAL_PROMPT=0：要凭证时直接失败，不卡在交互提示上
+    GIT_TERMINAL_PROMPT=0 git -C "$root" fetch --quiet origin >&2 \
+        || echo "wt: 警告 —— git fetch origin 失败，改用本地已有的 origin 引用（可能不是最新）" >&2
+    for cand in "$(git -C "$root" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)" \
+                origin/main origin/master; do
+        [ -n "$cand" ] || continue
+        if git -C "$root" rev-parse --verify --quiet "${cand}^{commit}" >/dev/null; then
+            echo "$cand"; return
+        fi
+    done
+    echo "wt: 警告 —— 找不到 origin 的默认分支（origin/HEAD、origin/main、origin/master 都没有），--branch 退回从 HEAD 切" >&2
+    echo HEAD
+}
+
 cmd_new() {
     local purpose="" ref="" branch="" no_env=0 copy_venv=0 no_hook=0
     while [ $# -gt 0 ]; do
@@ -94,6 +118,18 @@ cmd_new() {
     root=$(main_root) || exit 1
     mkdir -p "$WT_HOME"          # 必须先建：否则 canon 算不出父目录 realpath（首次使用踩过）
     path=$(wt_path_of "$purpose")
+    # 只有「给了 --branch 且没给 ref」才改默认基；detached 验证树仍默认 HEAD（验的就是当前改动）。
+    # --no-track：从远端引用切时 git 默认会把它设成上游，新分支就去跟踪 main —— 与旧行为（从本地 HEAD 切、无上游）不一致。
+    local track_arg=""
+    if [ -n "$branch" ] && [ -z "$ref" ]; then
+        ref=$(default_branch_base "$root")
+        if [ "$ref" = HEAD ]; then
+            echo "wt: --branch 未指定 ref，退回从 HEAD 切（原因见上方警告）"
+        else
+            track_arg="--no-track"
+            echo "wt: --branch 未指定 ref，从 ${ref} 切（R2：不叠在别线分支上）"
+        fi
+    fi
     ref=${ref:-HEAD}
 
     # 幂等前置清理：只清「本仓注册过的 worktree」或「空目录」。别人的东西一律拒绝，不盲 rm -rf。
@@ -110,7 +146,8 @@ cmd_new() {
     git -C "$root" worktree prune
 
     if [ -n "$branch" ]; then
-        git -C "$root" worktree add -q -b "$branch" "$path" "$ref" || die "wt: worktree add 失败"
+        # shellcheck disable=SC2086  # track_arg 为空时必须展开成零个参数
+        git -C "$root" worktree add -q $track_arg -b "$branch" "$path" "$ref" || die "wt: worktree add 失败"
     else
         git -C "$root" worktree add -q --detach "$path" "$ref" || die "wt: worktree add 失败"
     fi
@@ -243,6 +280,6 @@ case "${1:-}" in
     gc)   shift; cmd_gc   "$@" ;;
     path) shift; cmd_path "$@" ;;
     main) shift; cmd_main "$@" ;;
-    ""|-h|--help) sed -n '2,20p' "$0" ;;
+    ""|-h|--help) sed -n '2,/^# Exit:/p' "$0" ;;
     *) die "wt: 未知子命令 '$1'（wt --help）" ;;
 esac
