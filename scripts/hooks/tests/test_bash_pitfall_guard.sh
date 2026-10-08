@@ -4,8 +4,8 @@
 # 跑法：bash scripts/hooks/tests/test_bash_pitfall_guard.sh
 # 变异验证：GUARD=<改坏一条规则的副本> bash 本脚本 → 该规则的正例必须转红，否则用例没有判别力。
 #
-# 规则 6 / 7 的判定器（zsh_wordsplit_check.py / zsh_modifier_check.py）按 guard 自身所在目录查找，
-# 所以变异时要把 guard 副本和两个 .py 一起拷进同一个临时目录，再改其中一个。
+# 规则 6 / 7 / 8 的判定器（zsh_wordsplit_check.py / zsh_modifier_check.py / docker_prune_check.py）
+# 按 guard 自身所在目录查找，所以变异时要把 guard 副本和三个 .py 一起拷进同一个临时目录，再改其中一个。
 #
 # 每条规则至少 2 正 2 反，反例优先覆盖规则本身明写的放行例外（venv 绝对路径、cd 锚定、引号等），
 # 因为那些例外才是最容易被后来人"顺手收紧"改坏的部分。
@@ -133,6 +133,59 @@ expect_allow "R7 单引号 awk \$NF\":\"\$2"      "awk '{print \$NF\":\"\$2}' f"
 expect_allow "R7 单引号 perl 脚本里的 \$x:r"   "perl -e 'print \$x:r'"
 expect_allow "R7 单引号 sed 脚本里的 \$x:h"    "sed 's/\$x:h/y/' f"
 expect_allow "R7 单引号不平衡则放行不猜"       "echo 'unterminated \$b:r"
+
+# ---- 规则 8：会删镜像 / build cache 的 docker 全局清理 ----
+# 正例钉「命中 <标签>」，同时验证判定器认出的是哪一类，不只是"被拦了"。
+# 正例 1 = 2026-10-07 事故原句（删掉 colar/pptagent-lab:v1d-f60543fb…，B3 硬阻塞）
+expect_deny  "R8 原始事故 image prune -a -f; builder prune -a -f" "docker image prune -a -f; docker builder prune -a -f" "命中 docker image prune -a"
+expect_deny  "R8 image prune -af"              "docker image prune -af"                             "命中 docker image prune -a"
+expect_deny  "R8 image prune -fa"              "docker image prune -fa"                             "命中 docker image prune -a"
+expect_deny  "R8 image prune --all --force"    "docker image prune --all --force"                   "命中 docker image prune -a"
+expect_deny  "R8 -a 配 --filter 也不豁免"      "docker image prune -a --filter until=24h -f"        "命中 docker image prune -a"
+expect_deny  "R8 system prune -af"             "docker system prune -af"                            "命中 docker system prune -a"
+expect_deny  "R8 system prune --all"           "docker system prune --all --volumes"                "命中 docker system prune -a"
+expect_deny  "R8 builder prune -a -f"          "docker builder prune -a -f"                         "命中 docker builder prune -a"
+expect_deny  "R8 buildx prune --all --force"   "docker buildx prune --all --force"                  "命中 docker buildx prune -a"
+expect_deny  "R8 buildx --builder x prune -a"  "docker buildx --builder desktop-linux prune -af"    "命中 docker buildx prune -a"
+expect_deny  "R8 docker rmi 指定镜像"          "docker rmi colar/pptagent-lab:v1d"                  "命中 docker rmi"
+expect_deny  "R8 docker image rm"              "docker image rm -f 4a875bff"                        "命中 docker image rm"
+expect_deny  "R8 docker image remove 别名"     "docker image remove f29eecdc"                       "命中 docker image remove"
+expect_deny  "R8 ; 之后"                       "docker ps; docker system prune -af"                 "命中 docker system prune -a"
+expect_deny  "R8 && 之后"                      "df -h && docker image prune -af"                    "命中 docker image prune -a"
+expect_deny  "R8 | 之后"                       "yes | docker system prune -a"                       "命中 docker system prune -a"
+expect_deny  "R8 | xargs docker rmi"           "docker images -q | xargs -n 1 docker rmi"           "命中 docker rmi"
+expect_deny  "R8 换行分隔的第二行"             $'df -h\ndocker builder prune -a -f'                 "命中 docker builder prune -a"
+expect_deny  "R8 反斜杠续行"                   $'docker builder prune \\\n  --all -f'               "命中 docker builder prune -a"
+expect_deny  "R8 env 赋值前缀"                 "DOCKER_HOST=unix:///var/run/docker.sock docker image prune -af" "命中 docker image prune -a"
+expect_deny  "R8 --context xxx"                "docker --context colima image prune -a -f"          "命中 docker image prune -a"
+expect_deny  "R8 -H tcp://…"                   "docker -H tcp://127.0.0.1:2375 system prune -af"    "命中 docker system prune -a"
+expect_deny  "R8 --host=… rmi"                 "docker --host=unix:///x.sock rmi abc"               "命中 docker rmi"
+expect_deny  "R8 sudo / 绝对路径 docker"       "sudo /usr/local/bin/docker rmi abc"                 "命中 docker rmi"
+expect_deny  "R8 bash -c 包裹"                 "bash -c 'docker image prune -af'"                   "命中 docker image prune -a"
+expect_deny  "R8 if 条件里"                    "if docker system prune -af; then echo ok; fi"       "命中 docker system prune -a"
+expect_deny  "R8 \$(…) 命令替换里"             "echo \$(docker rmi abc)"                            "命中 docker rmi"
+expect_deny  "R8 放行前缀只管紧跟的那一条"     "ALLOW_DOCKER_PRUNE=1 docker image prune -af && docker rmi abc" "命中 docker rmi"
+expect_deny  "R8 放行值必须是 1"               "ALLOW_DOCKER_PRUNE=0 docker rmi abc"                "命中 docker rmi"
+expect_deny  "R8 export 不是放行（非全局开关）" "export ALLOW_DOCKER_PRUNE=1; docker image prune -af" "命中 docker image prune -a"
+expect_allow "R8 放行前缀 + image prune -a"    "ALLOW_DOCKER_PRUNE=1 docker image prune -a -f"
+expect_allow "R8 放行前缀在 sudo 之前的赋值"   "sudo ALLOW_DOCKER_PRUNE=1 docker rmi abc"
+expect_allow "R8 不带 -a 的 image prune"       "docker image prune -f"
+expect_allow "R8 不带 -a 的 prune + --filter"  "docker image prune --filter until=24h -f"
+expect_allow "R8 不带 -a 的 system prune"      "docker system prune -f"
+expect_allow "R8 builder prune --reserved-space" "docker builder prune --reserved-space 10GB -f"
+expect_allow "R8 container prune 不删镜像"     "docker container prune -f"
+expect_allow "R8 docker ps -a 的 -a"           "docker ps -a"
+expect_allow "R8 docker images -a"             "docker images -a"
+expect_allow "R8 image ls --digests"           "docker image ls --digests | grep pptagent"
+expect_allow "R8 inspect"                      "docker inspect colar/pptagent-lab:v1d && docker image inspect abc"
+expect_allow "R8 --help"                       "docker image prune -a --help"
+expect_allow "R8 grep 参数里的字样"            "grep -rn \"docker image prune -a\" /Users/colar/x/RUNBOOK.md"
+expect_allow "R8 rg 单引号里的字样"            "rg 'docker rmi|docker system prune -af' docs/"
+expect_allow "R8 echo 未加引号也只是参数"      "echo docker rmi abc"
+expect_allow "R8 commit message 里提到"        "git commit -m \"docs: never run docker system prune -af\""
+expect_allow "R8 注释里"                       "docker image ls # 别跑 docker system prune -af"
+expect_allow "R8 heredoc 正文里"               $'cat > /Users/colar/x/RUNBOOK.md <<\'EOF\'\n不要运行 docker image prune -a\ndocker rmi abc\nEOF\necho done'
+expect_allow "R8 docker run -a stdout 不是 prune" "docker run --rm -a stdout alpine echo hi"
 
 echo "PASS $pass / FAIL $fail"
 [ "$fail" -eq 0 ]

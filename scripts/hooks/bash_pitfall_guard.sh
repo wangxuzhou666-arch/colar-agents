@@ -15,7 +15,8 @@
 #
 # 自证测试：bash scripts/hooks/tests/test_bash_pitfall_guard.sh —— 每条规则都有正例（必 deny）
 # 与反例（必放行，含各规则明写的放行例外）。改任何规则先跑它；新规则不带正反用例不许进。
-# 已知限制：heredoc 正文也在被扫的命令串里，往文件里写含这些形状的内容请用 Write/Edit 工具。
+# 已知限制：heredoc 正文也在被扫的命令串里（规则 8 除外，它的判定器会跳过 heredoc 正文），
+#           往文件里写含这些形状的内容请用 Write/Edit 工具。
 
 input=$(cat 2>/dev/null || true)
 [ -z "$input" ] && exit 0
@@ -108,6 +109,32 @@ if [ -z "$suggest" ]; then
       suggest="zsh 把未加花括号的 \$${modifier_name}:${modifier_letter} 里的 :${modifier_letter} 当修饰符吃掉（双引号里也照吃；2026-10-06 实测 \"refs/heads/\$b:refs/heads/\$b\" 展开成 refs/heads/feat/xefs/heads/feat/x，15 次 push 全败）。写 \${${modifier_name}}:${modifier_letter}… ；若本意就是用修饰符，写 \${${modifier_name}:${modifier_letter}}"
     fi
   fi
+fi
+
+# ---- 规则 8：会删镜像 / build cache 的 docker 全局清理 ----
+# 本机有钉死 digest、按政策不推 registry、无法按字节复原的本地镜像（织锦 PPTAgent 线 colar/pptagent-lab）。
+# 实证 2026-10-07：磁盘清理 session 把 docker image prune -a -f; docker builder prune -a -f 当无风险操作，
+# 删掉 B3 验收钉死的 v1d-f60543fb… 与 C 系列冻结 / 复核 / 变异镜像，零恢复来源，B3 硬阻塞。
+# 项目 RUNBOOK 写了「不要全局 prune」，但清理 session 读不到项目文档 —— 文本规则挡不住，所以进机械层。
+# 准入判据的例外：只有 1 次实证、不满足「已实证重踩」—— 那条判据是给可重试的坑定的，
+#     这条的后果不可逆，踩一次就够（Colar 2026-10-07 拍板）。
+# 拦：image/system/builder/buildx prune 带 -a/--all、docker rmi、docker image rm/remove（含 ; && | 之后、
+#     赋值前缀、sudo/xargs 包装、--context/-H、bash -c 包裹）。不拦：不带 -a 的 prune、只读子命令、
+#     引号 / 注释 / heredoc 里只是提到。
+# 放行：紧贴该条 docker 命令写前缀 ALLOW_DOCKER_PRUNE=1，只对紧跟的那一条生效；export 不算、
+#     不读环境变量 —— 刻意不做全局开关。
+# 判定在同目录 docker_prune_check.py（要切命令段、认引号 / heredoc，bash 正则写不清）；判定器缺失或异常一律放行。
+if [ -z "$suggest" ]; then
+  case "$cmd" in
+    *docker*)
+      docker_checker="$(dirname "${BASH_SOURCE[0]}")/docker_prune_check.py"
+      if [ -f "$docker_checker" ]; then
+        docker_hit=$(printf '%s' "$cmd" | python3 "$docker_checker" 2>/dev/null | head -n 1 || true)
+        if [ -n "$docker_hit" ]; then
+          suggest="命中 ${docker_hit}：会删镜像或 build cache，不是无风险清理。本机有钉死 digest、不推 registry、无法按字节复原的本地镜像（例如织锦 PPTAgent 线 colar/pptagent-lab；2026-10-07 一次磁盘清理跑 image prune -a + builder prune -a，删掉 B3 钉死的 v1d-f60543fb… 等镜像，零恢复来源）。先跑 docker image ls --digests 看清会删什么。更安全的替代：不带 -a 的 docker image prune（只删 dangling）；docker builder prune --reserved-space <大小>（不带 -a，保留一部分 cache；旧版 CLI 叫 --keep-storage）；确需 -a 时用 --filter（until= / label!=）排除要保留的。看清后若 Colar 明确要删，在这条 docker 命令前紧贴写 ALLOW_DOCKER_PRUNE=1（只对紧跟的这一条生效）"
+        fi
+      fi ;;
+  esac
 fi
 
 [ -z "$suggest" ] && exit 0
