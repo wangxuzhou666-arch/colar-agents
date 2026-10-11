@@ -17,10 +17,12 @@
 set +e
 
 THRESHOLD=${EXPLORE_READ_THRESHOLD:-6}
-# 硬上限 500K（2026-09-18 Colar 定）：低阈值（200K）会在任务早期误报——起手基线就 55-70K，
-# 调研读三个大文件即 190K，那时催 handoff 是纯亏。500K 不存在「才做了一点点」的情况，是真失控。
+# 硬上限 400K（2026-10-11 Colar 由 500K 下调）：400K 是大模型 smart zone 的界限，过线推理质量下降——
+# 首要理由是质量，成本次之。subagent 用同一条线，由 subagent_resume_guard.sh 在续派时硬拦；
+# 主 loop 这里仍只软提示：何时切 session 要看任务断点，是判断类。
+# 低阈值（200K）刻意不设：起手基线就 55-70K，调研读三个大文件即 190K，那时催 handoff 是纯亏。
 # 这是兜底，不是主手段：派发率上去了根本涨不到这里。实测最贵 session 峰值 718K。
-CEILING=${CONTEXT_CEILING:-500000}
+CEILING=${CONTEXT_CEILING:-400000}
 TAIL_BYTES=2000000   # 只读 transcript 尾部：整份可能几十 MB，hook 必须跑得完
 LOG_ENABLED=${EXPLORE_NUDGE_LOG:-1}   # 静默埋点开关，默认开；设 0 关闭（不影响 nudge/ceiling 主逻辑）
 
@@ -109,7 +111,8 @@ for line in reversed(lines):
 ceiling = int(os.environ["HOOK_CEILING"])
 ceiling_hit = ctx >= ceiling
 if ceiling_hit:
-    print(f"[context-ceiling::hook-only] 当前 context {ctx/1000:.0f}K，已过硬上限 {ceiling//1000}K。"
+    print(f"[context-ceiling::hook-only] 当前 context {ctx/1000:.0f}K，已过硬上限 {ceiling//1000}K"
+          f"（大模型 smart zone 的界限，过线推理质量下降）。"
           f"主 loop context 每轮全量重发，到这个水位每次工具调用都在重付 {ctx/1000:.0f}K —— "
           f"任务一到断点就 /handoff 换 session（或 /compact 就地压缩）。"
           f"这不是早期误报区间：起手基线才 55-70K。")
