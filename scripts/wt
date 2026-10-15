@@ -12,13 +12,19 @@
 #                              `bash scripts/wt-post-new.sh <主仓根> <新树路径>`（cwd=新树）；
 #                              钩子失败只警告，不拆树、不改 wt 退出码
 #   wt ls                     列出本仓所有 worktree，标注 脏 / 悬空 / 不在 ~/.wt
-#   wt rm <用途|路径>          拆掉；有未提交改动会**拒绝**并列出来，要显式 --force
+#   wt rm <用途|路径>          拆掉。两道拒绝门（exit 2），互相独立：
+#        --force               放行「有未提交改动」：默认拒绝并列出来，丢之前得显式确认
+#        --ignore-refs         放行「仓库里有 symlink 指进这棵树」：默认扫主工作树 + 本仓其他 worktree
+#                              （跳过 node_modules/.venv/.next/.git，深度 8 层），命中就拒绝并列出「链接 -> 目标」；
+#                              拆了它们会悬空（2026-10-14 织锦 docs/_wt-* 指进 worktree，拆后锚点页 404）
 #   wt run <用途> <cmd...>     在 worktree 内跑命令（子 shell，调用方 cwd 绝不进去）
 #   wt path <用途>             打印规范化后的绝对路径
 #   wt main                    打印**主工作树**根（在 worktree 里调用也返回主仓）
-#   wt gc                      prune 失联记录 + 删 ~/.wt 下的孤儿目录（干净的才删）
+#   wt gc                      prune 失联记录 + 删 ~/.wt 下的孤儿 worktree 目录。只动「确认是本仓前 worktree」的：
+#                              .git 文件的 gitdir 指向本仓 .git/worktrees/<名> 且该登记已不存在，
+#                              并且内容全在本仓对象库里（不丢东西）；_ 开头 / 无 .git 文件 / 别仓的一律跳过并列出
 #
-# Exit: 0 成功；1 用法/前置错误；2 拒绝执行（脏树、目录已存在且非本仓 worktree）
+# Exit: 0 成功；1 用法/前置错误；2 拒绝执行（脏树、有 symlink 指进、目录已存在且非本仓 worktree）
 #
 # 背景（2026-08-18 全量扫 5297 session、288 次 git worktree 调用得出的六类坑）：
 #  1. cwd 悬空：cd 进 worktree 后把它删了，shell 卡在不存在的目录，后续命令全 ENOENT（6 次）。
@@ -222,18 +228,50 @@ cmd_ls() {
     done
 }
 
+# 本仓所有 worktree（主仓 + 其他）里，解析后落在 $2 这棵树内的 symlink；每行「链接 -> 真实目标」。
+# 背景（2026-10-14）：织锦主仓 docs/_wt-* 软链指进 ~/.wt 里的 worktree，wt rm 拆树后线上锚点页全 404。
+# 范围：prune 掉 node_modules/.venv/.next/.git（体积大；.venv/node_modules 是 wt 自己挂回主仓的环境链接），
+# 深度封顶 8 层；被拆树自己内部的链接不算。织锦实测 24 棵树全扫 0.5s，所以不只扫主仓。
+# 调用方必须先确认 realpath 可用——本函数跑在 $(…) 里，die 只会杀掉子 shell、返回空输出，等于放行。
+symlinks_into_tree() {
+    local root=$1 target=$2 tree link dest
+    git -C "$root" worktree list --porcelain | awk '/^worktree /{print substr($0,10)}' | while read -r tree; do
+        [ "$tree" = "$target" ] && continue
+        [ -d "$tree" ] || continue
+        find "$tree" -maxdepth 8 \( -name node_modules -o -name .venv -o -name .next -o -name .git \) -prune -o -type l -print0 \
+            | while IFS= read -r -d '' link; do
+                case "$link" in "$target"/*) continue ;; esac
+                dest=$(realpath "$link" 2>/dev/null) || continue   # 悬空链接解析不了：本来就不指向任何东西
+                case "$dest" in "$target"|"$target"/*) printf '%s -> %s\n' "$link" "$dest" ;; esac
+            done
+    done
+}
+
 cmd_rm() {
-    local force=0 target=""
+    local force=0 ignore_refs=0 target=""
     while [ $# -gt 0 ]; do
         case "$1" in
-            --force|-f) force=1; shift ;;
-            *)          target=$1; shift ;;
+            --force|-f)    force=1; shift ;;
+            --ignore-refs) ignore_refs=1; shift ;;
+            *)             target=$1; shift ;;
         esac
     done
-    [ -n "$target" ] || die "用法: wt rm <用途|路径> [--force]"
+    [ -n "$target" ] || die "用法: wt rm <用途|路径> [--force] [--ignore-refs]"
     local root path; root=$(main_root) || exit 1
     path=$(wt_path_of "$target")
     [ "$path" != "$root" ] || deny "wt: 拒绝拆主工作树"
+
+    # 门 1：有 symlink 指进这棵树。与 --force 无关：--force 只表示「接受丢未提交内容」，不表示「接受别处的链接悬空」。
+    if [ -d "$path" ] && [ "$ignore_refs" -eq 0 ]; then
+        command -v realpath >/dev/null || die "wt: 缺 realpath，没法判断有没有 symlink 指进 ${path}，拒绝拆；确认没有引用后加 --ignore-refs"
+        local refs; refs=$(symlinks_into_tree "$root" "$path")
+        if [ -n "$refs" ]; then
+            echo "wt: 拒绝拆 —— 仓库里还有 symlink 指进 ${path}，拆了它们全部悬空（读这些链接的页面/脚本会 404）：" >&2
+            printf '%s\n' "$refs" | head -20 >&2
+            echo "wt: 先把链接改指别处或删掉；确认就是要让它们悬空再 wt rm $target --ignore-refs" >&2
+            exit 2
+        fi
+    fi
 
     if [ -d "$path" ] && [ "$force" -eq 0 ]; then
         local dirty; dirty=$(wt_dirty "$path")
@@ -255,20 +293,57 @@ cmd_rm() {
     case "$PWD" in "$path"|"$path"/*) echo "wt: 当前 shell 的 cwd 在已删目录里，请 cd $root" >&2 ;; esac
 }
 
+# 孤儿树里还有没有「对象库里找不到」的内容。孤儿的 index/HEAD 随登记目录一起没了，git status 跑不起来——
+# 而「跑不起来 = 输出为空 = 干净」正是旧版 gc 的漏洞。改验：每个普通文件的内容都已是本仓对象库里的 blob
+# （都在 ⇒ 删了不丢东西）。.git / .venv / node_modules 不计（与 wt_dirty 口径一致：环境目录不算内容）。
+# 输出找不到的文件（最多 5 个）；校验过程任何一步出错都输出一行说明——调用方只看「有无输出」，所以出错 = 不干净。
+unsaved_files() {
+    local dir=$1 root=$2 files oids batch
+    files=$(find "$dir" \( -path "$dir/.git" -o -path "$dir/.venv" -o -path "$dir/node_modules" -o -path "$dir/frontend/node_modules" \) -prune -o -type f -print) \
+        || { echo "(无法列出文件，按不干净处理)"; return; }
+    [ -n "$files" ] || return 0
+    oids=$(printf '%s\n' "$files" | git -C "$root" hash-object --no-filters --stdin-paths) \
+        || { echo "(无法计算内容哈希，按不干净处理)"; return; }
+    batch=$(printf '%s\n' "$oids" | git -C "$root" cat-file --batch-check) \
+        || { echo "(无法查询对象库，按不干净处理)"; return; }
+    [ "$(printf '%s\n' "$files" | wc -l)" = "$(printf '%s\n' "$batch" | wc -l)" ] \
+        || { echo "(文件数与校验结果对不上，按不干净处理)"; return; }
+    paste -d ' ' <(printf '%s\n' "$files") <(printf '%s\n' "$batch") | sed -n 's/ [0-9a-f]* missing$//p' | head -5
+}
+
+# gc 只删「确认是本仓前 worktree」的目录——正向证据，而不是「不在登记里 + git status 为空」的排除法
+# （2026-10-14 旧版据此把不是 worktree 的 ~/.wt/_logs 当孤儿 rm -rf 了；同理，在 A 仓跑 gc 还会误删 B 仓干净的 worktree）。
+# 正向证据 = .git 是文件，其 gitdir 指向「本仓 .git/worktrees/<名>」且那个登记已经不存在。
 cmd_gc() {
-    local root; root=$(main_root) || exit 1
+    local root common; root=$(main_root) || exit 1
+    common=$(cd "$root" && cd "$(git rev-parse --git-common-dir)" && pwd -P)
     git -C "$root" worktree prune
     echo "wt: prune 完成"
-    local d
+    local registered d gitdir unsaved
+    registered=$(git -C "$root" worktree list --porcelain)
     for d in "$WT_HOME"/*; do
         [ -d "$d" ] || continue
-        if ! git -C "$root" worktree list --porcelain | grep -qxF "worktree $(canon "$d")"; then
-            if [ -z "$(wt_dirty "$d")" ]; then
-                rm -rf "$d"; echo "wt: 清掉孤儿目录 $d"
-            else
-                echo "wt: 保留 $d（不是本仓 worktree 但里面有内容，人工确认）"
-            fi
+        if printf '%s\n' "$registered" | grep -qxF "worktree $(canon "$d")"; then continue; fi   # 活的 worktree，不归 gc 管
+        case "$(basename "$d")" in _*) echo "wt: 跳过 ${d}（不是 worktree：_ 开头是工具自留目录）"; continue ;; esac
+        if [ -L "$d" ] || [ -L "$d/.git" ] || [ ! -f "$d/.git" ]; then
+            echo "wt: 跳过 ${d}（不是 worktree：没有 .git 文件）"; continue
         fi
+        gitdir=$(sed -n 's/^gitdir: //p' "$d/.git" | head -1)
+        if [ -z "$gitdir" ]; then echo "wt: 跳过 ${d}（不是 worktree：.git 文件里没有 gitdir 行）"; continue; fi
+        case "$gitdir" in /*) ;; *) gitdir="$d/$gitdir" ;; esac
+        if [ -e "$gitdir" ]; then
+            echo "wt: 跳过 ${d}（登记还在 ${gitdir}，不是孤儿：属于别的仓库，或被挪过位置）"; continue
+        fi
+        if [ "$(canon "$(dirname "$gitdir")")" != "$(canon "$common/worktrees")" ]; then
+            echo "wt: 跳过 ${d}（登记 ${gitdir} 不属于本仓，到所属仓库里 gc）"; continue
+        fi
+        unsaved=$(unsaved_files "$d" "$root")
+        if [ -n "$unsaved" ]; then
+            echo "wt: 保留 ${d}（本仓的孤儿 worktree，但有对象库里找不到的内容，人工确认）："
+            printf '    %s\n' "$unsaved"
+            continue
+        fi
+        rm -rf "$d"; echo "wt: 清掉孤儿目录 $d"
     done
 }
 
