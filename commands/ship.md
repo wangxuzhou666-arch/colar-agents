@@ -44,6 +44,7 @@ git status --short && git log --oneline -3
 
 **Guard（命中即停，不往下走）**：
 - `BRANCH` 为空 → **detached HEAD，停下告知**（无法安全 push）
+- `BRANCH` = `main` → **⚠️ 警告（不停）**：计划行标 `⚠️ shipping from main`。有协作规范的仓（织锦 AGENTS.md）main 只经 PR 合入，pre-commit 会直接拦 main 上的 commit——该先开任务分支（`wt new <用途> --branch <名>`）再 ship
 - `git status --short` + memory repo 都为空 → "**无改动，无可 ship**"，退出
 - `gh repo view --json visibility -q .visibility 2>/dev/null` → 记下 `PUBLIC`/`PRIVATE`，**PUBLIC 时 secret gate 升为阻断级**，计划行标 `⚠️ target=PUBLIC`
 
@@ -110,12 +111,14 @@ bash ~/Desktop/colar-agents/scripts/secret-gate.sh "$ROOT"
 git push origin "$BRANCH"   # 显式 origin+branch；colar-agents 有 upstream remote，禁裸 push
 ```
 - commit：conventional `feat(scope):…`/`fix(scope):…`（英文）；Co-Authored-By 行由 harness 按当前模型自动注入，**不在此写死模型名**（硬编码必 drift）
-- push 前 `git status` 须 clean；无 upstream → `git push -u origin "$BRANCH"`
-- `git pull --rebase origin "$BRANCH" && git push origin "$BRANCH"`；**rebase 冲突 → `git rebase --abort` 回干净点 + 停下告知**（绝不 force push）
+- push 前 `git status` 须 clean
+- **首次推送**（无 upstream）→ `git push -u origin "$BRANCH"`；仓库有 `scripts/pr_claim.sh` → 接着跑 `bash scripts/pr_claim.sh claim`（开 draft PR，在 PR 描述登记负责人 / 执行位置 / 任务；幂等，重跑只更新字段）
+- **推送被拒（non-fast-forward / fetch first）→ 停下报告，不自动整合**：远端分支上有你没有的提交，说明「一分支一个写入方」已被破坏（别的会话 / 云端助理也在写这条分支）。不 `pull --rebase`、不 `pull`、不 `merge origin/"$BRANCH"`、绝不 `push --force`——`git fetch origin` 后把 `git log --oneline HEAD..origin/"$BRANCH"` 列给 Colar，由他定以谁为准
+- 开发分支要跟上主干只用 `git merge origin/main`（不 rebase）：推送因此永远是快进
 - `--no-push` → 只 commit
 - **SINGLE-REPO 模式：到此整条流程结束**（不再跑下面的独立 memory 提交）
 
-✅ Project lane 完成即输出：`project ✅ <sha> pushed origin/<branch> · build:pass/skip · review:clean/N/skip@tier1`
+✅ Project lane 完成即输出：`project ✅ <sha> pushed origin/<branch> · build:pass/skip · review:clean/N/skip@tier1`，下一行点名状态档位（见收尾摘要）
 
 ---
 
@@ -154,15 +157,28 @@ git -C ~/Desktop/colar-memory pull --rebase origin main && git -C ~/Desktop/cola
 ```
 ✅ Shipped
   project: <sha> · pushed origin/<branch> · build:pass · review:clean
+  状态：   ② 已推送 —— PR #38
   memory:  <sha> · pushed · N files · drift:clean   (或 ⏸ 等你确认 SOUL § X 升级)
 ```
+
+**状态档位（收尾必须点名，取已达到的最高一档，档名原文照抄；织锦 AGENTS.md 同一张词表）**：
+
+```
+① 代码写完 —— 未提交 / 已提交未推送
+② 已推送 —— PR #N（尚未开 PR 写「已推送·无 PR」）
+③ 测试通过 —— <哪档门> @<SHA>（门绿只对该 SHA 成立）
+④ 已合并 —— main @<merge SHA>
+⑤ 已部署 —— <环境/URL> @<SHA>
+```
+
+PR 号取 `gh pr view --json number,state -q '"#\(.number) \(.state)"'`（尽力而为，取不到写 `② 已推送 —— PR unknown`，不猜号）；`--no-push` 停在 ①。
 
 ## 硬规则
 
 - ❌ secret gate 命中 → 停，只报文件名不贴原文；PUBLIC repo 阻断级
 - ❌ build/test 失败 → 停，贴真实报错，不假装通过
 - ❌ SOUL「升级」类 → 停等确认（只阻塞 memory lane，不连坐 project）
-- ❌ git 冲突 → `rebase --abort` + 停，绝不 `push --force`
+- ❌ 推送被拒 → 停下报告（单写入方被破坏），不 pull / rebase / merge 远端分支，绝不 `push --force`；开发分支跟主干只 `git merge origin/main`
 - ❌ 禁裸 `git push` / `git add -A`（colar-agents 有 upstream remote；over-stage 会带出凭证草稿）
 - ✅ secret gate / build 是 Tier 无关的；review 才按 Tier 缩放
 - ✅ 过程产物只列路径不 open、不粘原文；报告如实标跳过+原因
@@ -177,6 +193,7 @@ git -C ~/Desktop/colar-memory pull --rebase origin main && git -C ~/Desktop/cola
 | SOUL 升级连坐 project commit | judgment 步骤卡死已验证的机械步骤 |
 | 同 repo 双重 commit | cwd==memory 时一个 repo 提交两次，历史脏 |
 | 裸 push / add -A | 推错 remote / 带出未 review 凭证 |
+| 推送被拒就 `pull --rebase` 自动整合 | 把别人的提交和你的悄悄缠在一起，「两个写入方在写同一条分支」这件事被掩盖，直到有人强推丢提交 |
 | build 没过就 commit | 把坏代码 ship，信任崩 |
 | 每次硬塞一条 memory | 动态/显而易见内容入 memory = 内容腐烂 |
 

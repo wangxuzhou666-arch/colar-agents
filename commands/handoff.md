@@ -24,6 +24,9 @@ find . -name "*.md" -newer .git/HEAD \
 ls .claude/research/ 2>/dev/null                                    # 已有研究产物
 lsof -i :3000 -i :3001 -i :8000 2>/dev/null | grep LISTEN           # dev server
 wc -l .env.local 2>/dev/null                                        # env 行数（不读内容，守 SOUL 凭证铁律）
+GIT_TERMINAL_PROMPT=0 git fetch --quiet origin                      # 尽力而为；失败就按上次 fetch 的 origin 引用算，标 [unverified]
+git rev-list --left-right --count "origin/$(git branch --show-current)...HEAD"   # 输出「落后<TAB>领先」；报错 = 从没推过这条分支
+gh pr view --json number,state -q '"#\(.number) \(.state)"'         # PR 号 + 状态；gh 不可用 / 没开 PR → 写 unknown，不猜号
 ```
 
 外加从对话上下文提取：TodoWrite state / 最近 3 个 commit message / 本 session 关键决策 + why / 踩过的坑。
@@ -50,7 +53,9 @@ head_sha: f9c6abb                  # /resume 用它 vs `git rev-parse HEAD` 比�
 dirty_modified: 1                  # 已跟踪但改动的文件数
 dirty_untracked: 0
 session_date: 2026-05-30
-deploy_status: 已commit未push      # 本地未commit / 已commit未push / 已push待build / 线上已生效（有部署管道的项目必填）
+deploy_status: "② 已推送 —— PR #38"   # 五档词表择一、档名原文照抄（见模板下方）；有部署管道的项目必填
+vs_origin: "领先 2 / 落后 0"          # git rev-list --left-right --count origin/<分支>...HEAD；没有 origin/<分支> 写「未推送过」
+pr: "#38 OPEN"                        # gh pr view 尽力而为；取不到写 unknown
 collection_mode: normal            # normal | degraded（见 handoff-recovery.md）
 next_command: "npx vitest run rule-engine"
 verify_command: "open http://localhost:3000"
@@ -85,6 +90,18 @@ Mental model（此刻继续要装回脑里的核心抽象，几行压清；这�
 ```
 ````
 
+**`deploy_status` 五档词表**（取已达到的最高一档；织锦 AGENTS.md 与 `/ship` 收尾用同一张表）：
+
+```
+① 代码写完 —— 未提交 / 已提交未推送
+② 已推送 —— PR #N（尚未开 PR 写「已推送·无 PR」）
+③ 测试通过 —— <哪档门> @<SHA>（门绿只对该 SHA 成立）
+④ 已合并 —— main @<merge SHA>
+⑤ 已部署 —— <环境/URL> @<SHA>
+```
+
+旧交接块里的四档（2026-10-17 前）按此映射读，别当成新档位：`本地未commit` → ① 未提交 · `已commit未push` → ① 已提交未推送 · `已push待build` → ② 或 ③（看门有没有对那个 SHA 跑绿）· `线上已生效` → ⑤。
+
 **内容纪律**（配额超出即 prune，压力下移到"已完成"段——what 可从 `git log --oneline` 重建）：
 
 - **Mental model**：全块信息密度最高、最不可恢复，几行压清但不为省字砍它。
@@ -103,6 +120,7 @@ Mental model（此刻继续要装回脑里的核心抽象，几行压清；这�
 | `head_sha` / `branch` | `git rev-parse HEAD` / `git branch --show-current` 比对块内值 | 用户带外回贴，标 `[user-oob]` |
 | 引用的每个文件路径 | `test -f <path>` 终检一次 | 纯 `Read` 逐个确认 |
 | `dirty_modified` / `dirty_untracked` | `git status --short` 拆两类计数比对 | 标 `[unverified]` |
+| `deploy_status` / `vs_origin` / `pr` | 档名与五档词表逐字一致；`vs_origin` 用 Step 1 的 rev-list 重算；fetch 或 gh 失败的字段标 `[unverified]` / 写 unknown | 标 `[unverified]` |
 | **块内一致性**（sha / branch / dirty） | frontmatter YAML ↔ 下方"下次入口/摘要"里若重复引用则两处一致，不一致即返工 | 同 normal（纯文本比对） |
 | **落盘文件名一致性** | 块内引用的 `.claude/handoffs/<file>`（`verify_command` 等）== Step 4 实际写入的 slug 文件名，且 `test -f` 真存在（不靠 `check-ignore`——它对不存在文件也命中），不一致即返工 | 同 normal |
 | 安全 / 危机 claim | 跑其 `how_to_falsify` 回填 | 用户带外证伪 |
@@ -130,7 +148,7 @@ Self-verify 通过后，交接块除了进 chat，**再逐字写一份到 `.clau
 - ✅ 时间估计强制 AI 协作口径（"10 AI min" / "1.5 AI h"，不写裸 `2h`）— 链回 CLAUDE.md ⏱️ 锚点
 - ✅ `session_date` 与过期判断只采信 `[time-context::hook-only]` 注入行；过期 = 距 `expired_on` > 7 天 → 强制带 action；写绝对日期，禁相对词；hook `UNAVAILABLE` → 显式标"无法确定当前时间，过期判断挂起"
 - ✅ 任何"选 X / Y / Z"的 step 必带 `DEFAULT_ACTION`（无 default 的决策门 = 阻塞新 session 等于无门）
-- ✅ frontmatter 必填：`head_sha` / `lane` + `session_id` / `next_command` + `verify_command` + `expected_outputs` / `dirty_modified` + `dirty_untracked` 两个 int / `deploy_status`（有部署管道时）
+- ✅ frontmatter 必填：`head_sha` / `lane` + `session_id` / `next_command` + `verify_command` + `expected_outputs` / `dirty_modified` + `dirty_untracked` 两个 int / `deploy_status`（有部署管道时，五档原文）/ `vs_origin` + `pr`（有 origin 时；取不到写 unknown）
 - ✅ 安全 / 危机类 claim（注入 / 污染 / 入侵 / 数据丢失）一律走 handoff-recovery.md 的 Confab Gate，status 不准直接写 `ACTIVE`
 - ❌ 不把 handoff 内容写进 MEMORY.md（临时交接 ≠ 稳定 axiom）；不在当前 session commit dirty files 凑"已完成"（除非用户明确说）
 
