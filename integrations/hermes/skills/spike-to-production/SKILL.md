@@ -442,7 +442,9 @@ grep -n "exclude '<脏文件所在目录>/'" scripts/deploy/sync.sh   # 它会�
 ⚠️ 部署快照会把未提交文件一并封进去（本次日志：`dirty_files_snapshotted=1`）。这只影响
 回滚锚点的内容记录，不影响线上——但汇报时要说清楚，别让人以为那些改动上线了。
 
-收尾必附一行**部署状态**：`本地未commit / 已commit未push / 已push待build / 线上已生效`，
+收尾必附一行**部署状态**，取已达到的最高一档、档名原文照抄（与 `/ship`、`/handoff` 同一张五档词表；
+旧四档怎么对到新档见 `commands/handoff.md`）：
+`① 代码写完（未提交 / 已提交未推送）· ② 已推送（PR #N）· ③ 测试通过（哪档门 @SHA）· ④ 已合并 main @SHA · ⑤ 已部署 <环境> @SHA`，
 并说清哪个 URL 对应哪个环境。
 
 ## Pitfalls
