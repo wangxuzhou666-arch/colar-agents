@@ -16,13 +16,14 @@ stdin 喂整条 Bash 命令；命中时 stdout 打印一行「<类别> <标签>�
   - git push 带 --no-verify
   - git push 带 --force / -f（含 -uf 合写）/ --force-with-lease[=…] / --force-if-includes / --mirror / 「+」开头的 refspec
   - git -c core.hooksPath=… / --config-env[=]core.hooksPath=…：任何子命令、任何值（键不分大小写，git 本身就不分）
-  - git config [作用域 / 类型选项] core.hooksPath <值>（值不是 .githooks）、git config --unset[-all] core.hooksPath，
-    以及 git 2.46+ 的同义写法 git config set / unset
+  - git config core.hooksPath <值>（值不是 .githooks）；--global / --system / --worktree / --file（-f）下设
+    core.hooksPath，值是什么都拦——全局设成相对路径 .githooks，本机所有没有 .githooks 目录的仓就整体不跑钩子；
+    git config --unset[-all] core.hooksPath；以上都含 git 2.46+ 的同义写法 git config set / unset
   - git 全局选项（-C <目录> / -c k=v / --git-dir …）在子命令之前、以及规则 8 同款的包装与 bash -c 递归
 不命中：
   - git push -n / --dry-run（演习，没有副作用）；--delete / -d / 「:分支」删除；普通推送
-  - git config core.hooksPath .githooks（带不带 --local 都放行：织锦 SessionStart 钩子每次开会话都跑这一句）；
-    只读：不带值的 git config core.hooksPath、--get / --get-regexp / --list …
+  - git config [--local] core.hooksPath .githooks（本仓配置，织锦 SessionStart 钩子每次开会话都跑这一句）；
+    只读（任何作用域）：不带值的 git config core.hooksPath、--get / --get-all / --show-origin / --list …
   - 只是「提到」：引号里 / 注释 / heredoc 正文 / commit message 里；git stash push 之类别的子命令
 放行：紧贴该条 git 命令写前缀 ALLOW_NO_VERIFY=1（跳钩子 / 换钩子目录）/ ALLOW_GIT_FORCE=1（强推 / --mirror），
   只对紧跟的那一条生效、各管各的；export 不算 —— 同规则 8 的 ALLOW_DOCKER_PRUNE=1。
@@ -42,7 +43,7 @@ ALLOW_FORCE = "ALLOW_GIT_FORCE=1"
 GIT_VALUE_OPTS = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env"}
 FORCE_LONG = ("--force", "--force-with-lease", "--force-if-includes", "--mirror")
 HOOKS_PATH = "core.hookspath"   # git 配置键不分大小写，一律转小写再比
-REPO_HOOKS_DIR = ".githooks"    # core.hooksPath 唯一放行的值（原样比，./.githooks 也不算）
+REPO_HOOKS_DIR = ".githooks"    # core.hooksPath 唯一放行的值，且只在本仓配置里（原样比，./.githooks 也不算）
 
 # 各子命令「后面跟一个值」的选项：值可能恰好长得像 -n / +ref，必须连同值一起跳过。
 # VALUE_SHORT：-m <msg>，合写时（-am msg）其后的字母都属于值；OPTIONAL_SHORT：-u[<mode>] 这种值只能紧贴。
@@ -57,12 +58,14 @@ PUSH_VALUE_SHORT = set("o")
 PUSH_VALUE_LONG = {"--repo", "--receive-pack", "--exec", "--push-option"}
 CONFIG_VALUE_SHORT = set("ft")   # -f <文件> / -t <类型>
 CONFIG_VALUE_LONG = {"--file", "--blob", "--type", "--value", "--comment", "--default", "--url"}
+# 本仓配置（默认 / --local）以外的作用域：在这些地方设 core.hooksPath 不看值，一律拦（-f 即 --file）
+CONFIG_OTHER_SCOPES = ("--global", "--system", "--worktree", "--file")
 # 旧写法里这些动作不是「给键赋值」（另有 --get* 一族）：只读 / 列出 / 编辑器 / 改段名
 CONFIG_NOT_SET = {"--list", "--edit", "--rename-section", "--remove-section"}
 
 
 def parse_args(args, value_short, optional_short, value_long):
-    """拆成（短选项字母集合，长选项名列表，位置参数列表）。"""
+    """拆成（短选项字母集合，长选项名列表，位置参数列表）；吃值的短选项本身也记进字母集合（git config -f 要认）。"""
     shorts, longs, positionals = set(), [], []
     i = 0
     while i < len(args):
@@ -79,6 +82,7 @@ def parse_args(args, value_short, optional_short, value_long):
         elif a.startswith("-") and len(a) > 1:
             for k, ch in enumerate(a[1:], 1):
                 if ch in value_short:
+                    shorts.add(ch)
                     if k == len(a) - 1:
                         i += 1  # 值在下一个词
                     break
@@ -128,7 +132,7 @@ def push_hit(args, assigns):
 
 
 def config_hit(args, assigns):
-    """git config 换走 / 清掉 core.hooksPath；设成 .githooks 放行。git 2.46+ 的 set / unset 子命令同等对待。"""
+    """git config 换走 / 清掉 core.hooksPath；只放行在本仓配置里设成 .githooks。git 2.46+ 的 set / unset 同等对待。"""
     shorts, longs, words = parse_args(args, CONFIG_VALUE_SHORT, set(), CONFIG_VALUE_LONG)
     if words and words[0] in ("set", "unset"):
         action, words = words[0], words[1:]
@@ -142,9 +146,11 @@ def config_hit(args, assigns):
         return None
     if action == "unset":
         return "hooks-path git config --unset core.hooksPath"
-    if len(words) > 1 and words[1] != REPO_HOOKS_DIR:
-        return "hooks-path git config core.hooksPath " + words[1]
-    return None   # 不带值是读；设成 .githooks 放行
+    # 本仓配置以外的作用域不看值：全局设成相对路径 .githooks，本机所有没有 .githooks 目录的仓就整体不跑钩子
+    scope = next((x for x in longs if x in CONFIG_OTHER_SCOPES), "-f" if "f" in shorts else "")
+    if len(words) > 1 and (scope or words[1] != REPO_HOOKS_DIR):
+        return "hooks-path git config " + (scope + " " if scope else "") + "core.hooksPath " + words[1]
+    return None   # 不带值是读；本仓配置设成 .githooks 放行
 
 
 def hooks_path_option(opts, assigns):

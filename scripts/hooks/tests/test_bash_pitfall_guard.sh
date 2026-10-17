@@ -237,7 +237,7 @@ expect_allow "R9 heredoc 正文里"               $'cat > /Users/colar/x/AGENTS.
 expect_allow "R9 --help"                       "git push --force --help"
 
 # ---- 规则 9（续）：换钩子目录 core.hooksPath 同属跳钩子，push --mirror 同属强推 ----
-# 唯一放行的值是原样的 .githooks：织锦 SessionStart 钩子每次开会话都跑那一句（反例第一条照抄原句）。
+# 唯一放行的是本仓配置（默认 / --local）里原样的 .githooks：织锦 SessionStart 钩子每次开会话都跑那一句（反例第一条照抄原句）。
 # 键不分大小写（git 本身就不分）；-c / --config-env 不看值，任何子命令都拦。
 expect_deny  "R9 -c core.hooksPath=… 换钩子目录" "git -c core.hooksPath=/dev/null commit -m wip"     "命中 git -c core.hooksPath=/dev/null"
 expect_deny  "R9 -c 键全小写 core.hookspath"   "git -c core.hookspath=/tmp/empty push origin feat/x" "命中 git -c core.hookspath=/tmp/empty"
@@ -249,8 +249,8 @@ expect_deny  "R9 --config-env=键=变量"         "git --config-env=core.hooksPa
 expect_deny  "R9 --config-env 键=变量 分开写"  "git --config-env core.hooksPath=HOOKS_DIR push origin feat/x" "命中 git --config-env core.hooksPath=HOOKS_DIR"
 expect_deny  "R9 config 指走钩子目录"          "git config core.hooksPath /dev/null"                "命中 git config core.hooksPath /dev/null"
 expect_deny  "R9 config --local 指走"          "git config --local core.hooksPath .git/hooks-off"   "命中 git config core.hooksPath .git/hooks-off"
-expect_deny  "R9 config --global 指走"         "git config --global core.hooksPath /tmp/no-hooks"   "命中 git config core.hooksPath /tmp/no-hooks"
-expect_deny  "R9 config -f <文件> 吃值"        "git config -f .git/config core.hooksPath /tmp/x"    "命中 git config core.hooksPath /tmp/x"
+expect_deny  "R9 config --global 指走"         "git config --global core.hooksPath /tmp/no-hooks"   "命中 git config --global core.hooksPath /tmp/no-hooks"
+expect_deny  "R9 config -f <文件> 吃值"        "git config -f .git/config core.hooksPath /tmp/x"    "命中 git config -f core.hooksPath /tmp/x"
 expect_deny  "R9 config --type <类型> 吃值"    "git config --type path core.hooksPath /tmp/x"       "命中 git config core.hooksPath /tmp/x"
 expect_deny  "R9 config 键大小写混写"          "git config Core.HooksPath /tmp/x"                   "命中 git config core.hooksPath /tmp/x"
 expect_deny  "R9 config 设成空值"              "git config core.hooksPath ''"                       "命中 git config core.hooksPath："
@@ -283,6 +283,25 @@ expect_allow "R9 --delete 写在远端之前"        "git push --delete origin f
 expect_allow "R9 commit message 里提到 hooksPath / --mirror" "git commit -m \"docs: never run git -c core.hooksPath=/dev/null or git push --mirror\""
 expect_allow "R9 grep 参数里的 core.hooksPath" "grep -rn \"core.hooksPath /dev/null\" /Users/colar/x/docs"
 expect_allow "R9 heredoc 正文里的 hooksPath / --mirror" $'cat > /Users/colar/x/AGENTS.md <<\'EOF\'\n禁止 git config core.hooksPath /dev/null 与 git push --mirror\nEOF\necho done'
+# 作用域：本仓配置以外（--global / --system / --worktree / --file / -f）设 core.hooksPath 不看值都拦——
+# 全局设成相对路径 .githooks，本机所有没有 .githooks 目录的仓就整体不跑钩子。每个作用域旗标两个方向各一条：设成 .githooks 必拦、只读必放。
+expect_deny  "R9 scope --global 设成 .githooks 也拦" "git config --global core.hooksPath .githooks"   "命中 git config --global core.hooksPath .githooks"
+expect_deny  "R9 scope --system 设成 .githooks 也拦" "git config --system core.hooksPath .githooks"   "命中 git config --system core.hooksPath .githooks"
+expect_deny  "R9 scope --worktree 设成 .githooks 也拦" "git config --worktree core.hooksPath .githooks" "命中 git config --worktree core.hooksPath .githooks"
+expect_deny  "R9 scope --file <文件> 设成 .githooks 也拦" "git config --file .git/config core.hooksPath .githooks" "命中 git config --file core.hooksPath .githooks"
+expect_deny  "R9 scope --file=<文件> 紧贴写"   "git config --file=/Users/colar/.gitconfig core.hooksPath .githooks" "命中 git config --file core.hooksPath .githooks"
+expect_deny  "R9 scope -f <文件> 设成 .githooks 也拦" "git config -f /Users/colar/.gitconfig core.hooksPath .githooks" "命中 git config -f core.hooksPath .githooks"
+expect_deny  "R9 scope set --global（git 2.46+）" "git config set --global core.hooksPath .githooks" "命中 git config --global core.hooksPath .githooks"
+expect_deny  "R9 scope 不认强推的前缀"         "ALLOW_GIT_FORCE=1 git config --global core.hooksPath .githooks" "命中 git config --global core.hooksPath .githooks"
+expect_allow "R9 scope ALLOW_NO_VERIFY=1 放行 --global" "ALLOW_NO_VERIFY=1 git config --global core.hooksPath .githooks"
+expect_allow "R9 scope --global --get 是读"    "git config --global --get core.hooksPath"
+expect_allow "R9 scope --global 不带值是读"    "git config --global core.hooksPath"
+expect_allow "R9 scope --system --get-all 是读" "git config --system --get-all core.hooksPath"
+expect_allow "R9 scope --worktree --show-origin 是读" "git config --worktree --show-origin core.hooksPath"
+expect_allow "R9 scope --file <文件> --get 是读" "git config --file .git/config --get core.hooksPath"
+expect_allow "R9 scope -f <文件> 不带值是读"   "git config -f /Users/colar/.gitconfig core.hooksPath"
+expect_allow "R9 scope --global --list | grep 是读" "git config --global --list | grep -i hookspath"
+expect_allow "R9 scope get --global（git 2.46+）是读" "git config get --global core.hooksPath"
 
 echo "PASS $pass / FAIL $fail"
 [ "$fail" -eq 0 ]
