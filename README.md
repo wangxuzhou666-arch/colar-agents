@@ -1,63 +1,65 @@
 # colar-agents
 
-我自己跑 Claude Code 的工作流框架。底层 agent 池 fork 自 [msitarzewski/agency-agents](https://github.com/msitarzewski/agency-agents)，上面这一层 —— Tier 1/2/3 任务分流、Money Finder 4 平台深挖、SOUL ↔ Memory 双层人格、UI/UX Design Bridge 门卫 —— 是我跨设备同步个人 AI 助手时长出来的，跨多个项目 daily driver。
+*English | [中文](README.zh.md)*
 
-朋友路过想抄哪段直接拿，issue 我可能不回。
+A workflow framework I run my own Claude Code setup on. The underlying agent pool is forked from [msitarzewski/agency-agents](https://github.com/msitarzewski/agency-agents); everything on top of it — Tier 1/2/3 task routing, a 4-platform opportunity-mining pipeline, a two-layer SOUL/Memory persona system, a UI/UX design gate — grew out of keeping a personal AI assistant consistent across devices and multiple daily-driver projects.
+
+Take whatever's useful; I may be slow on issues.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ---
 
-## 三层"分层"
+## Three layers of "layering"
 
-这个 repo 真正区别于上游 fork 的不是 agent 数量,是三套完全不同的"分层"机制叠在一起。看完这一节基本就知道值不值得抄。
+What actually differentiates this repo from the upstream fork isn't agent count — it's three independent layering mechanisms stacked on top of each other. This section is enough to tell whether it's worth borrowing from.
 
-### 1. Tier 1/2/3 — 按任务规模分流执行节奏
+### 1. Tier 1/2/3 — routing execution rhythm by task size
 
-起因是早期对所有任务都跑 plan→review 流程,改个 typo 都要 5 分钟开场白。后来按预期耗时拆三档:
+This came out of running a full plan → review cycle on every task, including typo fixes that took 5 minutes just to open. Now tasks split into three tiers by expected effort:
 
-| Tier | 适用场景 | 流程 |
+| Tier | Scope | Flow |
 |---|---|---|
-| **Tier 1** (< 30min) | 单文件 / 单函数修改 | `act → /diff → commit`,不 plan 不 review |
-| **Tier 2** (30min~2h) | 跨文件改动 | 加载上下文 → 选 1-3 agent → YOLO 执行 → /diff → build → /review → save memory → commit |
-| **Tier 3** (2h+) | 跨 session 重构 / 新系统 | EnterPlanMode 出完整方案 → 子模块小步 commit → 每 milestone 验证 → /review → PR |
+| **Tier 1** (< 30min) | single-file / single-function edit | `act → /diff → commit` — no plan, no review |
+| **Tier 2** (30min–2h) | cross-file changes | load context → pick 1-3 agents → execute autonomously → `/diff` → build → `/review` → save memory → commit |
+| **Tier 3** (2h+) | cross-session refactor / new system | full plan mode → incremental commits per submodule → verify each milestone → `/review` → PR |
 
-完整规则在 [CLAUDE.md](CLAUDE.md) 顶部。时间口径都是用 Claude Code 协作的预期耗时,不是手写代码的耗时。
+Full rules live at the top of [CLAUDE.md](CLAUDE.md). All time estimates are for effort *collaborating with Claude Code*, not hand-writing the code.
 
-> 配套规则:Memory Save 节点只存非显而易见的内容(被排除的方案及原因 / 关键架构决策的 trade-off / 下次 session 需要继承的上下文)。代码模式、文件路径、git 历史这些直接读代码,不进 memory。
+> Companion rule: memory writes only capture what isn't obvious from the code — excluded approaches and why, trade-offs behind architectural decisions, context the next session needs to inherit. Code patterns, file paths, git history stay in the code, not in memory.
 
-### 2. 三层 agent 自动发现 — 单一真相源 + 项目分层
+### 2. Three-tier agent discovery — single source of truth + per-project scoping
 
-agent 文件按以下结构分布,Claude Code 自动发现,调用时不用手动指定:
+Agent files are laid out so Claude Code auto-discovers them without manual specification:
 
 ```
-~/.claude/agents/                ← Tier 1: 全局万能 agent,所有项目可用
-<project>/.claude/agents/        ← Tier 2: 按项目精选的专项 agent
-~/Desktop/colar-agents/         ← Master library: agent 源(不直接加载)
+~/.claude/agents/                ← Tier 1: global agents, available to every project
+<project>/.claude/agents/        ← Tier 2: project-specific agent selection
+~/Desktop/colar-agents/         ← Master library: agent source (not loaded directly)
 ```
 
-> agent 数量随项目演化变化,不在此处声明。当前快照: `ls ~/.claude/agents/ | wc -l`。
+> Agent count changes as projects evolve and isn't pinned here. Current snapshot: `ls ~/.claude/agents/ | wc -l`.
 
-**Master library 是单一真相源**。每个项目的 `.claude/agent-config.yaml` 声明需要哪些 agent,跑 [scripts/sync-all.sh](scripts/sync-all.sh) 从 master 复制到项目。不在 master 之外手写 agent,避免 N 份漂移。
+**The master library is the single source of truth.** Each project's `.claude/agent-config.yaml` declares which agents it needs; [scripts/sync-all.sh](scripts/sync-all.sh) copies them in from master. Agents are never hand-written outside master, to avoid N drifting copies.
 
-新加 agent 到项目: 编辑 `.claude/agent-config.yaml` → `bash scripts/sync-agents.sh <project-path>`。
+Adding an agent to a project: edit `.claude/agent-config.yaml` → `bash scripts/sync-agents.sh <project-path>`.
 
-### 3. SOUL ↔ Memory 双层人格 — 稳定 axioms vs 易变事实
+### 3. SOUL ↔ Memory two-layer persona — stable axioms vs. mutable facts
 
-跨 session 维持一致人格的最大坑是: 把易变事实(评估中的方向、求职状态、portfolio 数字)写进 SOUL,导致 6 个月后 SOUL drift 还不自知。我的拆法:
+The biggest failure mode for keeping a consistent persona across sessions is writing mutable facts (a direction still under evaluation, job-search status, portfolio numbers) into the stable layer, so it silently drifts within months. The split:
 
-| 层 | 职责 | 例子 |
+| Layer | Role | Examples |
 |---|---|---|
-| **SOUL.md** | 不变的 axioms: voice / boundaries / 数学公式输出格式 / 时间锚点纪律 | "默认中文"、"no emoji unless first"、"chat 里不准用 LaTeX 源码" |
-| **Memory** | 易变事实 + 演进型 framework: 项目状态、feedback、reference、predictions | "VC 五问 v0.6 正在评估 idea X"、"2026-04-21 AgentEval PAUSED" |
+| **SOUL.md** | Fixed axioms: voice, boundaries, output formatting rules, time-anchoring discipline | "default to Chinese", "no emoji unless the user uses them first" |
+| **Memory** | Mutable facts + evolving frameworks: project status, feedback, references, predictions | "evaluating idea X under framework v0.6", "project Y paused on 2026-04-21" |
 
-**三条防漂移护栏**:
+**Three anti-drift guardrails:**
 
-1. **写 memory 时**(语义最热): 新 memory 否定 / 升级了 SOUL 某段?立即手动同步
-2. **手动跑 drift 扫描**: `bash scripts/drift-check.sh` 扫黑名单 + 失效路径,命中输出 advisory(不阻断)。当前 Stop hook 用于 git sync 提醒,**未**接 drift-check
-3. **改 SOUL 时**: 反向 grep memory 列出该 deprecate 的旧措辞
+1. **When writing to memory** (while the semantics are freshest): does the new memory contradict or upgrade something in SOUL? Sync it immediately.
+2. **Manual drift scan**: `bash scripts/drift-check.sh` scans for a blacklist of stale phrasing and dead paths, output as advisory (non-blocking).
+3. **When editing SOUL**: reverse-grep memory for old phrasing that should now be deprecated.
 
-判断口诀: 如果一条声明在 6 个月后可能变,它就该住 Memory 不住 SOUL。
+Rule of thumb: if a statement might be false in 6 months, it belongs in Memory, not SOUL.
 
 ---
 
@@ -65,95 +67,95 @@ agent 文件按以下结构分布,Claude Code 自动发现,调用时不用手动
 
 ```
 colar-agents/
-├── CLAUDE.md                ← Tier 分流 + UI/UX pipeline + agent 发现机制
+├── CLAUDE.md                ← Tier routing + UI/UX pipeline + agent discovery mechanism
 ├── soul/
-│   ├── SOUL.md              ← 稳定 axioms (voice / 边界 / 公式输出 / 时间锚点)
+│   ├── SOUL.md              ← stable axioms (voice / boundaries / output formatting / time anchoring)
 │   ├── drift-blacklist.txt
 │   └── drift-whitelist.txt
 ├── scripts/
-│   ├── sync-all.sh          ← 同步所有项目的 agent 配置
-│   ├── sync-agents.sh       ← 同步单个项目
-│   ├── drift-check.sh       ← 手动跑 (未自动接 Stop hook)
-│   ├── convert.sh           ← 多工具集成转换
-│   └── install.sh           ← 多工具集成安装
-├── engineering/             ← 工程类 agent
-├── design/                  ← UI/UX/品牌
-├── marketing/               ← 多平台内容运营
-├── sales/                   ← B2B 销售
-├── paid-media/              ← 付费投放
-├── product/                 ← 产品管理
-├── project-management/      ← 项目协调
-├── testing/                 ← 测试 / QA
-├── support/                 ← 运营 / 财务 / 法务
+│   ├── sync-all.sh          ← sync agent config across all projects
+│   ├── sync-agents.sh       ← sync a single project
+│   ├── drift-check.sh       ← manual run (not yet wired to a Stop hook)
+│   ├── convert.sh           ← multi-tool integration conversion
+│   └── install.sh           ← multi-tool integration install
+├── engineering/             ← engineering agents
+├── design/                  ← UI/UX/brand
+├── marketing/               ← multi-platform content ops
+├── sales/                   ← B2B sales
+├── paid-media/              ← paid acquisition
+├── product/                 ← product management
+├── project-management/      ← project coordination
+├── testing/                 ← testing / QA
+├── support/                 ← ops / finance / legal
 ├── spatial-computing/       ← AR/VR/XR
-├── specialized/             ← 跨界专项
-├── academic/                ← 学术 / 世界观构建
-├── game-development/        ← 游戏开发 (Cross-engine + Unity / Unreal / Godot / Blender / Roblox)
-└── integrations/            ← Cursor / Aider / Windsurf 等导出
+├── specialized/             ← cross-domain specialists
+├── academic/                ← academic / worldbuilding
+├── game-development/        ← game dev (cross-engine + Unity / Unreal / Godot / Blender / Roblox)
+└── integrations/            ← exports for Cursor / Aider / Windsurf etc.
 ```
 
-完整 agent 列表 (按 division 分类带 specialty + 使用场景): [agents/INDEX.md](agents/INDEX.md)
+Full agent list (by division, with specialty + use case): [agents/INDEX.md](agents/INDEX.md)
 
 ---
 
 ## Quick Start
 
-只走 Claude Code 主路径。其他 IDE (Cursor / Aider / Windsurf / Copilot 等 10 种) 看 [integrations/README.md](integrations/README.md)。
+Primary path is Claude Code. For the other 10 supported IDEs (Cursor / Aider / Windsurf / Copilot / …) see [integrations/README.md](integrations/README.md).
 
 ```bash
-# 1. clone master library
+# 1. clone the master library
 git clone https://github.com/wangxuzhou666-arch/colar-agents.git ~/Desktop/colar-agents
 
-# 2. 同步全局通用 agent 到 ~/.claude/agents/
+# 2. sync global agents into ~/.claude/agents/
 bash ~/Desktop/colar-agents/scripts/sync-all.sh
 
-# 3. 在项目里声明专项 agent
+# 3. declare project-specific agents
 cd <your-project>
 mkdir -p .claude
-# 创建 .claude/agent-config.yaml,写入需要的 agent slug
+# create .claude/agent-config.yaml with the agent slugs you need
 bash ~/Desktop/colar-agents/scripts/sync-agents.sh "$(pwd)"
 ```
 
-如果你 fork 自用: 每个项目我只声明 4-7 个 agent,多了 Claude 选不准。
+If you fork this for your own use: keep each project to 4-7 declared agents — beyond that, Claude's selection gets noisy.
 
 ---
 
-## 几个真跑过的 pipeline
+## A few pipelines that actually run every week
 
-每周都在用的三个,触发词驱动。其他还有 Money Finder Lite/Mid/Max 三档、Sunk Cost 闸门 等,慢慢补。
+Three of these run weekly, triggered by keyword. A few more (Idea Maximum Mode's tiered budget, sunk-cost gates) are still being documented.
 
-### Money Finder (4 平台深挖)
+### Money Finder (4-platform opportunity mining)
 
-触发词: `money finder`。在小红书 / 抖音 / B 站 / 微信公众号四个平台同时挖一个 idea 的真实信号 —— 不是搜"有没有人做过",是看用户在哪发牢骚、什么场景下愿意付费。
+Trigger phrase: `money finder`. Digs for real signal on an idea across four Chinese platforms simultaneously — not "has anyone built this" but where users are actually complaining, and in what context they'd pay.
 
-锁死英文触发词是因为之前用"机会扫描"之类的中文词,Claude 总把它理解成搜券找补贴。
+The trigger phrase is deliberately English, because Chinese phrasing for "opportunity scan" kept getting parsed by Claude as a coupon/subsidy search.
 
-### Idea Maximum Mode (17-agent 陪审团)
+### Idea Maximum Mode (17-agent jury)
 
-触发词: `max mode`。评估创业 idea 默认走 17 个对抗性 agent 的并行陪审团模式,反 yes-man 是硬保险。Lite 模式 (3 agent) 会被 Claude 自身的讨好倾向带歪。
+Trigger phrase: `max mode`. Evaluating a startup idea defaults to a 17-agent adversarial jury running in parallel — a hard safeguard against yes-man drift. A lighter 3-agent mode is too easily pulled toward agreeing with whatever framing the user brings in.
 
-带闸门: ≥1500 字 brief 或 ≥4h 投入才允许启动 max mode,避免流程仪式化。
+Gated behind a ≥1500-word brief or ≥4h of committed effort, so the process doesn't become ritual.
 
-### UI/UX Design Bridge (设计前置门卫)
+### UI/UX Design Bridge (mandatory design gate)
 
-任何 UI 设计任务必经的前置 agent。它先确定目标品牌 (74 个可选: Linear / Stripe / Notion / Apple / Vercel / Spotify ...) → fetch 对应的 DESIGN.md → 输出 `instructions-{brand}.md` → 后续消费方是主 loop 的 skill 方案 (frontend-design plugin) 和 Frontend Developer。
+Every UI task passes through this agent first. It locks in a target design system (74 options: Linear / Stripe / Notion / Apple / Vercel / Spotify …) → fetches the matching DESIGN.md → outputs `instructions-{brand}.md`, which downstream consumers (a frontend-design skill and a Frontend Developer agent) build against.
 
-不跳过。即使是"改个按钮颜色",也先检查 design spec 存不存在。
+Never skipped — even "just change a button color" checks whether a design spec exists first.
 
 ---
 
-## 致谢
+## Acknowledgments
 
-底层 agent 池原型来自 [msitarzewski/agency-agents](https://github.com/msitarzewski/agency-agents),命名风格 (Whimsy Injector / Rapid Prototyper / Reality Checker) 我直接保留了 —— 当 placeholder 比我自己想 12 个 division 名字省脑。
+The underlying agent pool prototype comes from [msitarzewski/agency-agents](https://github.com/msitarzewski/agency-agents); I kept its naming style (Whimsy Injector, Rapid Prototyper, Reality Checker) as-is — reusing good placeholders beat inventing 12 division names myself.
 
-真正改造的是上面那一层: Tier 分流、三层发现、SOUL/Memory、Design Bridge、Money Finder、Idea Maximum Mode 这些工作流,跟原 repo 已经没什么关系。
+What's actually been rebuilt is the layer on top: tier routing, three-tier discovery, SOUL/Memory, the design gate, Money Finder, Idea Maximum Mode — these workflows have little left in common with the original repo.
 
 ---
 
 ## License
 
-MIT。
+MIT.
 
 ---
 
-> 这是个人工作系统不是 OSS 产品。issue / PR 我会看但响应慢,主要因为修一个跨 repo 的 sync 脚本对我有 ROI,对 fork 我的人不一定。
+> This is a personal working system, not an OSS product. I read issues/PRs but respond slowly — fixing a cross-repo sync script has clear ROI for me; for someone who forked this, maybe not.

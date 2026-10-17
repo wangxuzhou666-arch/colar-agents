@@ -38,9 +38,21 @@ kill -0 "${pid}" 2>/dev/null || exit 0
 
 now_epoch=$(date +%s)
 
-do_restart() {
+do_stop() {
   echo "[voice-healthcheck $(date '+%H:%M:%S')] $1" >>"${LOG_FILE}" 2>&1
-  exec bash "${START_SH}" restart >>"${LOG_FILE}" 2>&1
+  # **只停，不起**（2026-09-14 拍板，推翻了之前「故障就自动重启」的设计）。
+  # launchd 起的 daemon 拿不到 TCC 权限，而且这条补不上：
+  #   · 辅助功能 —— 会被系统自动记成一条 auth_value=0（拒绝）的条目；
+  #   · 麦克风   —— 连条目都建不了。macOS 的麦克风面板没有「+」按钮，
+  #                 条目只能由 App 弹窗申请时创建，而 launchd 进程弹不出那个窗。
+  # 结果是一个「活着但聋」的 daemon：status 报已就绪、热键也有反应，
+  # 但录进来是一路静音（TCC 拒绝麦克风时 macOS 不报错，直接给静音流），
+  # whisper 在静音上会稳定幻觉出「字幕志愿者 李宗盛」这类字幕组署名。
+  # 更糟的是它占着单例锁，挡住 SessionStart hook 去建一个权限正常的。
+  # 所以这里只负责**腾位置**：把卡死的停掉，下一个 Claude Code session
+  # 会用正确的权限归属重建一个能用的。
+  bash "${START_SH}" stop >>"${LOG_FILE}" 2>&1
+  exit 0
 }
 
 # ── 触发路径一：故障态检测（不等 uptime 阈值）────────────────────────────────
@@ -69,25 +81,15 @@ if [[ -f "${LOG_FILE}" ]]; then
       exit 0
     fi
     touch "${FAULT_STAMP}"
-    do_restart "检测到音频故障态（日志末尾故障行晚于最后一次成功识别），立刻重启。"
+    do_stop "检测到音频故障态（日志末尾故障行晚于最后一次成功识别），停掉它——下一个 Claude Code session 会用正确权限重建。"
   fi
 fi
 
-# ── 触发路径二：预防性重启（原有逻辑）──────────────────────────────────────
-# 用 pidfile 自身的 mtime 当「这一轮 daemon 是什么时候起的」——
-# 每次启动都会重写这个文件，比解析 `ps -o etime` 简单可靠（etime 的格式随运行时长在变）。
-pid_file_epoch=$(stat -f %m "${PID_FILE}" 2>/dev/null) || exit 0
-uptime_hours=$(( (now_epoch - pid_file_epoch) / 3600 ))
-
-(( uptime_hours < MAX_UPTIME_HOURS )) && exit 0
-
-# 日志最近 30 秒内有更新，说明可能正在录音/转录，这轮先跳过，等下一轮健康检查再判断，
-# 免得重启打断一次正在进行的识别。
-if [[ -f "${LOG_FILE}" ]]; then
-  log_epoch=$(stat -f %m "${LOG_FILE}" 2>/dev/null) || log_epoch=0
-  if (( now_epoch - log_epoch < 30 )); then
-    exit 0
-  fi
-fi
-
-do_restart "已运行 ${uptime_hours}h ≥ 阈值 ${MAX_UPTIME_HOURS}h，主动重启一次（预防性，非故障触发）。"
+# ── 触发路径二：预防性重启 —— 2026-09-14 已移除 ────────────────────────────
+# 它当初是为了兜「见招拆招见不完」的未知卡死。2026-09-13 查到那类卡死的真正根因
+# （InputStream 没给 blocksize，PortAudio 协商出 15 帧缓冲 → 每个 IO 周期都过载 →
+#  stop/close 卡住 → IO context 泄漏 → HAL 客户端卡死），已在 voice_daemon.py 根治，
+# 这条的理由随之消失。而它每触发一次就造一个没有 TCC 权限的聋 daemon
+# （2026-09-14 08:46 实测：预防性重启造出的 daemon 连录 5 次全是静音幻觉），
+# 收益为负，直接删掉。MAX_UPTIME_HOURS / VOICE_MAX_UPTIME_HOURS 因此不再有作用。
+exit 0

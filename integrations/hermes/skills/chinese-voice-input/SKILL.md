@@ -60,18 +60,39 @@ Claude Code 内置的 `/voice` 听写不支持中文。这个 skill 用一个自
 代码住 skill 目录（跟 colar-agents 一起进 git），运行时环境住 `~/.claude-voice-cn/`（不进 git）。
 
 **第四道防线：healthcheck 兜底**。`healthcheck.sh` 由 `com.colar.voice-cn-healthcheck.plist`
-每 30 分钟拉起一次，有**两条独立的触发路径**：
+每 5 分钟拉起一次（`StartInterval`，2026-09-13 从 1800s 缩到 300s）。**2026-09-14 起它只做一件事：
+检测到故障态就把 daemon `stop` 掉，绝不自己重启。**
 
-- **故障触发**（2026-09-01 加）：读 `daemon.log`，若「最后一条故障行」出现在「最后一条成功识别行」
-  之后，判定当前处于故障态，**立刻 restart，不等 uptime 阈值**。判据用**行序**不用时间戳——
-  日志行只有 `HH:MM:SS` 没有日期，跨天比时间会翻车。带 `VOICE_FAULT_COOLDOWN_SECONDS`（默认 3600）
-  冷却：权限缺失这类 restart 修不好的病会让故障态一直成立，没冷却就成了每 30 分钟无效重启一次。
-- **预防性重启**：daemon 存活超过 `VOICE_MAX_UPTIME_HOURS`（默认 2 小时）且当前没在录音/转录，
-  主动 `restart` 一次——不指望堵住所有可能的阻塞点，见招拆招见不完，定期重开换稳定性。
+- **故障检测**（2026-09-01 加）：读 `daemon.log`，若「最后一条故障行」出现在「最后一条成功识别行」
+  之后，判定当前处于故障态。判据用**行序**不用时间戳——日志行只有 `HH:MM:SS` 没有日期，跨天比时间会翻车。
+  带 `VOICE_FAULT_COOLDOWN_SECONDS`（默认 3600，本机 `config.sh` 里是 600）冷却。
+- **只停不起**：停掉就腾出了单例锁，下一个 Claude Code session 的 SessionStart hook 会重建一个
+  **权限正常**的 daemon。healthcheck 自己不碰启动。
 
-为什么两条都要：2026-09-01 撞上 CoreAudio 卡死（开流/关流/刷新设备表三个调用全部超时 10s），
-daemon 进程还活着、`status` 仍报「已就绪」，但 uptime 没满 2h → 预防性那条直接跳过，全程没兜住。
-**预防性重启探不到「没跑满阈值就坏掉」，故障触发探不到「还没坏但快坏了」，两条是互补不是冗余。**
+⚠️ **为什么它绝对不能自己起 daemon**（2026-09-14 实测坐实，此前两版设计都栽在这）：
+launchd 起的进程拿不到 TCC 权限，而且**这条补不上**——
+
+| 权限 | launchd 进程的下场 | 能不能手动补 |
+|---|---|---|
+| 辅助功能 | 系统自动写一条 `auth_value=0`（拒绝）的条目 | 能手动加，但要给整个 python 解释器开全局按键监听 |
+| **麦克风** | **连条目都不会建** | **不能**——macOS 麦克风面板没有「+」按钮，条目只能由 App 弹窗申请时创建，launchd 进程弹不出那个窗 |
+
+麦克风补不上，就意味着 launchd 起的 daemon **必然是聋的**。而 TCC 拒绝麦克风时 macOS **不报错**，
+直接给一路静音流，于是表现极具迷惑性：`status` 报「已就绪」、热键有反应、`daemon.log` 里
+一条错误都没有，但每次识别结果都是 **「字幕志愿者 李宗盛」**（whisper 在纯静音上的经典幻觉，
+字幕组署名，训练数据残留）。**连着几次识别出一模一样的字幕组署名 = 麦克风在送静音**，
+这是排查时最省事的单一判据。更糟的是这个聋 daemon 占着单例锁，挡住 SessionStart 去建能用的那个。
+
+走过的两版弯路，留着防止有人再走一遍：
+1. **`exec bash start.sh restart`**（2026-09-01～09-13）：launchd 在 job 退出时会回收 job 内剩下的
+   全部进程，`nohup` 挡不住（它防的是 SIGHUP，不是 launchd 那套 job 级回收）。起出来的 daemon
+   当场被收走 → 这道防线一直是**净负**，而下一个 session 的 hook 会把它重建，长期掩盖了这个 bug。
+2. **`perl fork+setsid` 脱离 job 容器**（2026-09-13，只活了一天）：daemon 确实活下来了，
+   但活下来的是上面那个聋子——**比当场死掉更糟**，因为死掉至少是显性失败、下个 session 能自愈。
+
+**预防性重启（2h uptime 到点主动重开）已于 2026-09-14 移除**：它当初是为了兜「见招拆招见不完」的
+未知卡死，而那类卡死的根因 2026-09-13 已查到并根治（见 Pitfalls 表音频卡死那行），理由消失；
+留着反而每触发一次就造一个聋 daemon。`VOICE_MAX_UPTIME_HOURS` 因此不再有作用。
 
 ⚠️ **`install.sh` 不会自动装这个 launchd 任务**——plist 文件存在不等于它在跑，必须手动
 `launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/com.colar.voice-cn-healthcheck.plist`
@@ -280,12 +301,13 @@ export VOICE_MODEL=mlx-community/whisper-large-v3-turbo
 | 打出带 Option 的怪符号 | 出来 `˙´ƒ` 之类 | 松键后修饰键状态没落定。调大 `export VOICE_SETTLE_SECONDS=0.4` |
 | 连按两次热键（上一句还没转录完） | 提示「上一句还在转录，本次录音先排队…」，两句都会分别转录打字 | 设计如此，不是丢弃而是排队——两句都会出现，等一下就好 |
 | **松开热键后卡死**（终端停在「录音中…」不再有任何反应） | 进程活着但完全没反应，必须 `stop` 才能恢复 | 三次独立事故的病灶都是"pynput 监听线程上跑了一段可能阻塞的同步调用"，已修复；根因链路、每次的具体阻塞点、验证方法见 `INCIDENT-2026-08-hang-on-release.md` |
-| **CoreAudio 卡死**（底层音频服务死掉，不是 daemon 死掉） | `status` 照样报「已就绪」，但按热键必报「麦克风打开失败」；日志里连着出现「开流/关流/刷新设备表 超过 10s 未返回，判定卡死」 | `start.sh restart` 通常够；无效说明是系统音频服务本身卡了 → `sudo killall coreaudiod` 再 restart。**别信 status**——它只看 pidfile + ready 标记，探不到音频子系统死活，要信 `daemon.log` 最后几行。healthcheck 的故障触发会在 30 分钟内自动兜住 |
+| **音频卡死（每 25-30 分钟必犯）—— 2026-09-13 已查到根因并修掉** | `status` 照样报「已就绪」，但按热键必报「麦克风打开失败」；日志里连着出现「开流/关流/刷新设备表 超过 10s 未返回，判定卡死」 | **根因不在系统，在我们自己**：`sd.InputStream` 没显式给 `blocksize`，PortAudio 协商出 15 帧（≈0.3ms）的缓冲，而 `_callback` 实测要 3.3ms —— 超 CoreAudio 的 IO 周期预算 8 倍，每个周期一条 `ClientHALIODurationExceededBudget`。过载积累后 `stop()/close()` 开始卡住，被超时放弃的 IO context 不会真释放，同一 pid 堆到 8 个 ContextID，最终 HAL 客户端彻底卡死。已加 `VOICE_BLOCKSIZE=1024` + `VOICE_LATENCY=high` 根治（A/B：故障那次 90s 内 56 条过载消息，修复后 3 分钟 0 条）。**若再复发**：先 `/usr/bin/log show --predicate 'process == "coreaudiod"'` 数过载消息，不是 0 就说明缓冲参数没生效，别再去重启 coreaudiod（2026-09-13 实测重启它完全无效，28 分钟照样复发——泄漏在客户端） |
 | **转录结果重复**（同一句话被打两遍，措辞还略有不同） | 明明只按了一次热键 | 多半是前台和后台各起了一个实例，两个都在响应同一个全局热键——已修复单实例检测的盲区，细节同上见 `INCIDENT-2026-08-hang-on-release.md` |
 | **session 开着但按热键没反应**（自动拉起时代最高频） | 没有终端窗口可看，完全不知道它是没起来、还在下模型、还是哑了 | 三步定位：① `start.sh status` → 「未运行」= 自动拉起失败，看 `daemon.log.prev`；「尚未就绪」= 还在载模型，等；② 「已就绪」还没反应 → 是权限问题，下一行 |
 | **第一个 session 开在没授权的 App 里** | `status` 说「已就绪」，但按键毫无反应；在已授权终端里重开 session 也没用 | daemon 是单例，谁先开谁占坑，且它继承的是**拉起它的那个 App** 的权限。解：`start.sh stop`，然后在**已授权的**终端里 `start.sh start`（或从那儿开 session） |
 | 自动拉起「失败」了却没看到任何提示 | hook 只在**进程起来就立刻死**时往 stderr 打一行；权限类是静默失效、模型下载是慢，这两种它探不到 | 按设计如此（不能让 hook 阻塞 session 等模型下完）。用 `status` + `daemon.log` 判断 |
 | 停了它又自己回来了 | `stop` 之后开个新 session，daemon 又起来了 | 自动拉起就是这个语义。真要它别回来：`touch ~/.claude-voice-cn/autostart.disabled` |
+| **VSCode 里权限已打勾但还是「完全没反应」**（2026-09-05 实测） | `status` 报「已就绪」；`daemon.log` 里连「录音中…」都没出现（不是转录卡死，是热键根本没被感知）；TCC 数据库查 `com.microsoft.VSCode` 的 `kTCCServiceAccessibility` 也显示 `auth_value=2`（已授权） | **权限"已打勾"≠"当前这个 VSCode 进程在用它"**——TCC 权限只在进程**下次启动**时生效，一个从打勾之前就开着、没重启过的 VSCode 主进程，会一直沿用旧的（未授权）权限状态，哪怕系统设置里显示已勾选。固定排查路径：① `bash ~/.claude-voice-cn/start.sh status` + `tail -30 ~/.claude-voice-cn/daemon.log` 看是"没反应"还是"卡死"（卡死走上面 CoreAudio/hang 那两行）；② 若日志里连「录音中…」都没有 → 查 TCC：`sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" "SELECT client,auth_value,last_modified FROM access WHERE service='kTCCServiceAccessibility' AND client LIKE '%VSCode%';"`；③ 用 `date -r <last_modified>` 换算授权时间，再用 `ps -eo pid,lstart,command \| grep "Visual Studio Code.app/Contents/MacOS/Electron"` 查 VSCode 主进程启动时间；④ **主进程启动时间早于授权时间 → 完全退出 VSCode（Cmd+Q，关窗口不算）再重开**，问题必解。以后 `/chinese-voice-input` 排障默认先走这条路径，不用逐步确认，除非查完发现不是这个模式再切换到别的 Pitfalls 行。 |
 
 ---
 

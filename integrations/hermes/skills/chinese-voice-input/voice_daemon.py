@@ -77,6 +77,19 @@ READY_FILE = os.environ.get("VOICE_READY_FILE", "")
 # （INCIDENT-2026-08-hang-on-release.md 第四次事故）。
 NATIVE_CALL_TIMEOUT = float(os.environ.get("VOICE_NATIVE_CALL_TIMEOUT", "10"))
 
+# 采集缓冲大小。**必须显式指定** —— 不给的话 PortAudio 会自己跟 CoreAudio 协商，
+# 2026-09-13 实测协商出来的是 15 帧（48kHz 下 ≈0.3ms），于是每 0.3ms 就要回调一次
+# Python，而 _callback（拿锁 + numpy copy + append）实测要 3.3ms，超 IO 周期预算 8 倍。
+# 系统日志里表现为每个周期一条：
+#   HALS_OverloadMessage ... cause: ClientHALIODurationExceededBudget
+#   io_buffer_size: 15, io_cycle_budget: 395833, HAL_client_IO_duration: 3270083
+# 过载积累之后 stream.stop()/close() 开始卡住不返回，被 call_with_timeout 放弃掉的
+# IO context 又不会真的释放，于是同一个 pid 下的 ContextID 越堆越多（实测堆到 8 个），
+# 最终整个 HAL 客户端彻底卡死 —— 这就是「每 25-30 分钟必卡一次」的成因。
+# 1024 帧 ≈ 21ms，把回调频率从 ~3200/s 降到 ~47/s，对听写延迟毫无影响。
+BLOCKSIZE = int(os.environ.get("VOICE_BLOCKSIZE", "1024"))
+LATENCY = os.environ.get("VOICE_LATENCY", "high")
+
 # 音频操作「正在进行中」标记文件。由 voicectl.sh 传入；status 靠它的存在时长
 # 判断是不是卡在开/关流里——单靠"进程活着"和"是否就绪"看不出这种半死状态。
 AUDIO_BUSY_FILE = os.environ.get("VOICE_AUDIO_BUSY_FILE", "")
@@ -268,6 +281,8 @@ class Recorder:
             samplerate=self.sample_rate,
             channels=1,
             dtype="float32",
+            blocksize=BLOCKSIZE,
+            latency=LATENCY,
             callback=self._callback,
         )
         self._stream.start()

@@ -1,6 +1,6 @@
 ---
 name: 3d-intake
-description: 织锦 3D 换料预览的外部素材入库流程，两条分支。A 服装 Block：CLO-SET 导出的 .glb / .gltf 散包 → UV 与材质槽体检（有无 UV / 是裁片展开还是 atlas / 几个槽）→ blocks/ 归位 → 按材质名（不是 mesh 名）做槽位映射 → 换件时 dispose 显存。B 面料 PBR：ambientCG CC0 整包 zip → 保留 Color + NormalGL + Roughness + AO 四通道（织锦已有的 fetch_ambientcg.py 只留 Color，3D 用途会缺质感）→ 白坯亮度归一化 → 去饱和 + multiply 染色 → 接进 map / normalMap / roughnessMap / aoMap。Use when: adding a new garment block or a new fabric to 织锦's 3D try-on preview, wiring PBR texture channels into a three.js MeshPhysicalMaterial, or debugging "the fabric looks like plastic / the dyed color comes out gray / GPU memory grows every time I switch garments".
+description: "织锦 3D 换料预览的外部素材入库流程，两条分支。A 服装 Block：CLO-SET 导出的 .glb / .gltf 散包 → UV 与材质槽体检（有无 UV / 是裁片展开还是 atlas / 几个槽）→ blocks/ 归位 → 按材质名（不是 mesh 名）做槽位映射 → 换件时 dispose 显存。B 面料 PBR：ambientCG CC0 整包 zip → 保留 Color + NormalGL + Roughness + AO 四通道（织锦已有的 fetch_ambientcg.py 只留 Color，3D 用途会缺质感）→ 白坯亮度归一化 → 去饱和 + multiply 染色 → 接进 map / normalMap / roughnessMap / aoMap。Use when: adding a new garment block or a new fabric to 织锦's 3D try-on preview, wiring PBR texture channels into a three.js MeshPhysicalMaterial, or debugging \"the fabric looks like plastic / the dyed color comes out gray / GPU memory grows every time I switch garments\"."
 version: 1.0.0
 source: session-derived (2026-08-10)
 project: fabric-agent-demo (织锦) — /Users/colar/Desktop/创业/fabric-agent-demo
@@ -33,6 +33,18 @@ project: fabric-agent-demo (织锦) — /Users/colar/Desktop/创业/fabric-agent
 
 ## Procedure — 分支 A：服装 Block
 
+> **先看这一条：织锦仓里已有端到端管线**（2026-08-18 起）。下面 A1-A5 是它内部做的事，
+> 手工照做只在管线不适用（新格式、要调参数）时才需要：
+>
+> ```bash
+> node scripts/assets/block_intake.mjs <input.zip|dir>... [--name <中文名>] [--skip-cover]
+> ```
+>
+> 一条命令吃 N 个包：解压 → 认主文件与贴图 → 转 GLB（FBX 走 Blender 重接材质）→
+> 压 KTX2/meshopt → 跑 `block_probe.py` 槽位体检 → 落库 + 写 manifest → 烘封面，
+> 最后出一张 HTML 报告把所有件的封面与体检结论铺开，供**一次过目、一次拍板**。
+> 它刻意不碰 git、不部署 —— 那两步各有各的坑，见报告页脚与 `scripts/assets/README.md`。
+
 ### A1. 拿到文件
 
 **Colar 提供 CLO-SET 导出文件**（本 skill 不写网站操作步骤 —— 2026-08-10 拍板，那段由 Colar 给文件）。
@@ -50,6 +62,32 @@ project: fabric-agent-demo (织锦) — /Users/colar/Desktop/创业/fabric-agent
 散包是 CLO-SET / Marvelous Designer 的**常见默认导出**。不打包直接给浏览器的话，loader 解析外部引用一律 404
 ——所以散包在终端就地打包，不走浏览器拖多文件那条兜底路。
 
+**中文版 CLO 导出的 zip 是 GBK 文件名，`unzip` 解不出来**（2026-08-10 实测）：
+
+```
+error: cannot create jacket/??????_...gltf
+       Illegal byte sequence
+```
+
+`unzip` 退出码 50，一个文件都没落地。zip 的 flag_bits 没置 0x800（UTF-8 位），文件名按 cp437 存的实为 GBK。
+用 python 转码解，顺手把 slug 改成 ASCII：
+
+```python
+import zipfile, os
+z = zipfile.ZipFile(src)
+for i in z.infolist():
+    name = i.filename
+    if not (i.flag_bits & 0x800):                      # 没标 UTF-8 → 大概率 GBK
+        try: name = i.filename.encode('cp437').decode('gbk')
+        except Exception: pass
+    dest = os.path.join(out, name)
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    if not name.endswith('/'):
+        with z.open(i) as f, open(dest, 'wb') as w: w.write(f.read())
+```
+
+Colar 的资产都出自中文 CLO，所以这条**每次都会撞上**，别当偶发。
+
 ### A2. 体检（接线前必做，AI 静态解析，不需要浏览器）
 
 python 直接解析 `.gltf` JSON + `.bin`（散包）或 GLB chunk，当场回答三件事：
@@ -60,6 +98,34 @@ python 直接解析 `.gltf` JSON + `.bin`（散包）或 GLB chunk，当场回�
 3. **有几个材质槽** —— `materials[]` 数量 + 每材质的 prim/三角数分布；只有 1 个 = 衣身 / 领子 / 袖子无法分开换
 
 任一项不过就别往下走，回去要新的导出。`glb-check.html`（spike 体检台）只作肉眼兜底，不是正步骤。
+
+**体检别再手搓了 —— 织锦仓里已经有工具**（2026-08-18 起）：
+
+```bash
+python3 scripts/assets/block_probe.py <file.glb>      # 人读；--json 供管线消费
+```
+
+它从 GLB 的 JSON chunk 直接算（零解码，压缩前后都能跑），一次给出三样：每材质的三角
+占比与世界包围盒、**离群部件**（包围盒连通分量分离 → 建议判 `off`）、**疑似配件**
+（面数与尺寸双小 → 建议判 `keep`）。抓不到的两类它会在报告里明写：贴合衣身的道具
+（衣架挂钩与衣身重叠，连通分量并进主体）和高模明线（面数比主料还大）。**「没检出」
+不等于「没问题」**，那两类仍要靠材质名正则 + 看封面。
+
+⚠️ **「占比最大的那个材质就是衣身」这条旧判据已被证伪，别再用。** sports-skirt01
+占比最大的是**配套袜子**（50.9%，131k tris），衣身各片加起来才 45.6% —— 配套小件用
+高模是常事，CLO 对针织罗纹尤其舍得给面。`block_probe.py` 第一版就是照这条写的，
+当场把袜子判成主体、衣身报成离群。**主体要按主轴跨度定**（衣身 0.805m vs 袜子 0.236m，
+差 3.4 倍，不受建模精度影响）。
+
+占比表仍然要看，只是读法变了：它用来发现**异常大的非主料**（明线、里衬），
+而不是用来认衣身。实例（leather-jacket01，这件的最大占比确实是衣身）：
+
+```
+mat[0]  'V2_Animal_Alternatives_VeganLeather_1_2801'  tris=139151 (79.4%)   ← 衣身
+mat[29] '默认明线_2828'                                tris=  5096 ( 2.9%)   ← 明线
+mat[30] '默认明线 复制 1_2852'                          tris=  4004 ( 2.3%)   ← 明线
+mat[1..28] 'Zipper N_...'                              各 <2%                ← 拉链
+```
 
 ### A3. 归位 + 验收
 
@@ -92,6 +158,18 @@ function guessSlot(matName) {
   return "main";   // 剩下的才是可换料的衣身
 }
 ```
+
+正则会往**两个方向**同时出错，两种都静默——没有报错，只有观感不对，所以只能靠 A2 那张占比表当场核：
+
+| 误判方向 | 实例 | 症状 | 判据 |
+|---|---|---|---|
+| **衣身被误判成配件** | `V2_Animal_Alternatives_VeganLeather_1_2801` —— 名字里的 `leather` 是**面料品名**（人造革衣身），不是配件材质，却命中配件正则 | 79.4% 的三角形拒绝换料，整件衣服换不了布 | 占比最大的材质被判 `keep`/`off` → 必错 |
+| **配件被误判成衣身** | `默认明线_2828`、`默认明线 复制 1_2852` —— 中文版 CLO 的默认命名，`topstitch\|stitch` 正则全落空 | 9.1k tris 的明线被贴上平铺面料 | 中文 / 乱码材质名一律**先假定正则没覆盖**，逐个判 |
+
+`leather` / `suede` 留在配件正则里仍是对的（真皮标、麂皮拼条确实这么命名），**不要为了这一件去删它**——
+删了下次就轮到真配件被贴布。正解是逐件登记 `SLOT_OVERRIDES`，让精确名压过正则。
+
+中文材质名会持续出现（Colar 的 CLO 是中文版），所以「正则是拉丁文假设」这条要一直记着。
 
 新 block 入库时逐材质核对槽位判定：正则漏掉的（乱码名 / 身份不明层）登记进 `SLOT_OVERRIDES`，
 身份不明的层默认 keep，等 Colar 在槽位表里切「隐藏」肉眼定夺后再改。
@@ -256,6 +334,23 @@ curl -s -o /dev/null -w "%{http_code}\n" "http://localhost:8765/textures/<Asset>
 | `file://` 直接打开 html | fetch 本地 GLB / 贴图被 CORS 挡 | 起 `python3 -m http.server` 走 localhost |
 | three.js 走 CDN importmap | CDN 一抖 module 死在第一行 import，页面只剩原始拖拽框、`?block=` 自动载入失效、零报错 | three 本体 + addons vendor 进本地目录（注意 r180 `RGBELoader.js` 只是转发壳，真身 `HDRLoader.js` 要一起带）；再加 window `error`/`unhandledrejection` 兜底把报错写上屏 |
 | `node -p "require('three/package.json')"` 查版本 | 被 three 的 exports 字段挡住 | 用 python 直接读文件，或看 importmap 里的 CDN 版本号 |
+| 中文版 CLO 的 zip 用 `unzip` 解 | `Illegal byte sequence`，退出码 50，一个文件都没落地 | python `zipfile` + cp437→gbk 转码（见 A1） |
+| 衣身材质名里带 `leather` / `suede` | 命中配件正则被判 `keep`，整件拒绝换料（实测 79.4% tris） | 看 A2 占比表，占比最大的被判 keep 就登记 `SLOT_OVERRIDES` |
+| 中文材质名（`默认明线`） | 配件正则全落空，落进 main 被贴平铺面料 | 中文名默认假定正则没覆盖，逐个判 |
+| **展示图把资产自带材质换成了平铺面料** | 展示图看着质感平淡，怎么调光都改善不了 | 见下节 —— 问题在内容不在渲染器 |
+
+### 「展示图质感平淡」的第一诊断：先看你换没换掉它自己的材质
+
+展示图（封面 / 缩略图）质感平淡时，第一反应会去查布光、曝光、色调映射——**通常不是根因**。
+常见的真凶是封面流水线在出图前把衣服的材质换成了库里的平铺面料：一件皮夹克自带 4K PBR
+（diffuse + normal + metallicRoughness），却被贴上只有 Color 通道的亚麻，出来是一件平淡的
+米色外套。展示图该呈现的是**衣服本来的样子**——皮革的高光、真丝的垂坠、针织的绒毛，那些质感
+全在资产自带的贴图里，不在渲染器里。
+
+判据：**展示图（封面 / 缩略图 / 首帧）默认用资产自带 PBR，换料是用户的主动动作。**
+副作用还是正的——进场第一眼与封面一致，且"换料"这件事从此有了前后对比，价值反而看得见。
+
+`--fabric` 这类换料参数保留为显式开关，别做成默认。
 
 ---
 
