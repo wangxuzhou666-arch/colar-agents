@@ -3,28 +3,45 @@
 #
 # Usage:
 #   wt new <用途> [ref]        建 worktree 到 ~/.wt/<repo>-<用途>（ref 默认 HEAD，detached）
-#        --branch <name>       建新分支而不是 detach。此时不给 ref → 默认从 origin 的默认分支切：先 fetch，
-#                              取 origin/HEAD 指向（再试 origin/main、origin/master），都没有退回 HEAD 并警告；
-#                              新分支不跟踪上游。显式给 ref（含 HEAD）一律照用。R2：不叠在别线未合并分支上
+#        --branch <name>       建新分支而不是 detach。分支已在本地或 origin 存在 → 拒绝（一分支一个写入方）。
+#                              不给 ref → 从 origin 的默认分支切：先 fetch（失败即停），取 origin/HEAD 指向
+#                              （再试 origin/main、origin/master），都没有退回 HEAD 并警告；新分支不跟踪上游。
+#                              显式给 ref（含 HEAD）一律照用。R2：不叠在别线未合并分支上
 #        --no-env              不继承 .venv / node_modules（不影响下面的仓库钩子）
 #        --copy-venv           拷贝 .venv 而不是 symlink（需要就地改依赖时用）
 #        --no-hook             不跑仓库钩子。默认：新树里有 scripts/wt-post-new.sh 就在环境继承后跑
 #                              `bash scripts/wt-post-new.sh <主仓根> <新树路径>`（cwd=新树）；
 #                              钩子失败只警告，不拆树、不改 wt 退出码
+#                              同名 worktree 已登记 → 拒绝，不再先拆后建（常驻树会被误拆）
 #   wt ls                     列出本仓所有 worktree，标注 脏 / 悬空 / 不在 ~/.wt
-#   wt rm <用途|路径>          拆掉。两道拒绝门（exit 2），互相独立：
+#   wt rm <用途|路径>          拆临时树。拒绝门（exit 2）互相独立，各放各的：
 #        --force               放行「有未提交改动」：默认拒绝并列出来，丢之前得显式确认
 #        --ignore-refs         放行「仓库里有 symlink 指进这棵树」：默认扫主工作树 + 本仓其他 worktree
 #                              （跳过 node_modules/.venv/.next/.git，深度 8 层），命中就拒绝并列出「链接 -> 目标」；
 #                              拆了它们会悬空（2026-10-14 织锦 docs/_wt-* 指进 worktree，拆后锚点页 404）
+#        --export-ignored      放行「有被 git 忽略、又不可再生的文件」：先按相对路径拷到
+#                              ~/fabric-evidence/<YYYY-MM-DD>-wt-<树目录名>/（附 sha256 清单、回验）再拆
+#        --ignored-ok          同上一门，确认都不要、不导出。可再生 = 缓存目录名（node_modules/.venv/__pycache__/
+#                              .pytest_cache/.mypy_cache/.ruff_cache/.next）· *.pyc/.DS_Store/*.tsbuildinfo · symlink ·
+#                              建树时就有的（wt new 记下的补灌产物）· 与主仓同路径文件逐字节相同的
+#                              没有放行开关的门：游离提交（HEAD 上有、任何分支 / tag / 远端都够不着）·
+#                              有进程在用（cwd 在树里或开着树里的文件；lsof 全量采样 3 次）。
+#                              分支上有不在任何远端的提交只警告（wt rm 不删分支）。git worktree remove 拒绝就停，不硬删
+#   wt done <用途|路径>        常驻树收尾：fetch（失败即停）→ 树干净、在分支上 → 分支 tip 与 origin/<分支>（若有）
+#                              都是 origin 默认分支的祖先 → switch --detach 过去 → git branch -d（绝不 -D）
+#   wt park <用途|路径> --reason <原因> [--ignore-refs]
+#                              暂停一条线：annotated tag archive/paused/<YYYYMMDD>/<分支> 推上 origin 并回读核对 →
+#                              不可再生的被忽略文件导出到 ~/fabric-evidence/<YYYY-MM-DD>-park-<树目录名>/ →
+#                              过 rm 的门拆树 → 核对 tag 仍指向分支 tip 后删本地分支、删远端分支（若有）
 #   wt run <用途> <cmd...>     在 worktree 内跑命令（子 shell，调用方 cwd 绝不进去）
 #   wt path <用途>             打印规范化后的绝对路径
 #   wt main                    打印**主工作树**根（在 worktree 里调用也返回主仓）
 #   wt gc                      prune 失联记录 + 删 ~/.wt 下的孤儿 worktree 目录。只动「确认是本仓前 worktree」的：
 #                              .git 文件的 gitdir 指向本仓 .git/worktrees/<名> 且该登记已不存在，
-#                              并且内容全在本仓对象库里（不丢东西）；_ 开头 / 无 .git 文件 / 别仓的一律跳过并列出
+#                              并且内容全在本仓对象库里（不丢东西）；_ 开头 / 无 .git 文件 / 别仓的一律跳过并列出。
+#                              登记着的树（含常驻线级树）gc 从不碰
 #
-# Exit: 0 成功；1 用法/前置错误；2 拒绝执行（脏树、有 symlink 指进、目录已存在且非本仓 worktree）
+# Exit: 0 成功；1 用法/前置错误（含 fetch、ls-remote 失败）；2 拒绝执行（上面各道门：脏树 / symlink 指进 / 同名目录 / 分支已存在 / 游离提交 / 有进程在用 / 不可再生的被忽略文件 / 未合入 / git 拒绝拆）
 #
 # 背景（2026-08-18 全量扫 5297 session、288 次 git worktree 调用得出的六类坑）：
 #  1. cwd 悬空：cd 进 worktree 后把它删了，shell 卡在不存在的目录，后续命令全 ENOENT（6 次）。
@@ -32,17 +49,25 @@
 #  2. /tmp ↔ /private/tmp 别名：git 存 realpath，用 /tmp/x 去 remove 对不上，只好 rm -rf + prune。
 #     → 所有路径过 `pwd -P` 规范化，落点固定 ~/.wt（无别名、非系统清理目标）。
 #  3. 防御式仪式：`rm -rf … && prune && add` 出现 33 次，`worktree list` 113 次（状态不可预测）。
-#     → new 内建幂等前置清理；ls 一屏给全状态。
+#     → ls 一屏给全状态。（new 早先内建「同名先拆」，2026-10-17 改为拒绝：~/.wt 里有常驻的线级树）
 #  4. 产物随 worktree 蒸发：部署史写进 worktree 的 REPO_ROOT，worktree 一删记录永久丢失
 #     （2026-08-18 实证：当天三次部署丢了一条）。同形事故还有 mutation_check.py 随 scratchpad 消失。
 #     → `wt main` 给出正确的落盘锚点；`wt rm` 默认不 --force，脏树先摊开给人看。
 #  6. 环境不随 worktree 走：每次手工 cp .venv / 删 node_modules symlink / 用主仓绝对路径跑 pytest。
 #     → new 默认把 .venv、node_modules symlink 进去。
 #  （第 5 类「落点四处开花」由 ~/.wt 约定本身消除。）
+# 2026-10-16 织锦分支清理又补三类「拆树丢东西」：git 不管的被忽略文件（.claude/handoffs、data/studio_assets 要先导出）·
+# 只挂在 detached HEAD 上的提交 · 有进程开着树里的文件（Docker 后端占着 config.yml，cwd 根本不在树里）。
+# 2026-10-17 协作规范：一分支一个写入方（--branch 不复用已有分支名）、常驻树收尾 / 暂停走 done / park。
 
 set -uo pipefail
 
 WT_HOME="${WT_HOME:-$HOME/.wt}"
+# 被忽略文件的导出落点（rm --export-ignored / park）。测试指向临时目录，绝不写进真实证据目录。
+WT_EVIDENCE_HOME="${WT_EVIDENCE_HOME:-$HOME/fabric-evidence}"
+# 拆树前判断「可再生、拆了不丢东西」的名字：任一层目录名命中前者 / 文件名命中后者（glob）。
+REGEN_DIR_NAMES=(node_modules .venv __pycache__ .pytest_cache .mypy_cache .ruff_cache .next)
+REGEN_FILE_GLOBS=('*.pyc' '.DS_Store' '*.tsbuildinfo')
 
 die()  { printf '%s\n' "$*" >&2; exit 1; }
 deny() { printf '%s\n' "$*" >&2; exit 2; }
@@ -50,7 +75,7 @@ deny() { printf '%s\n' "$*" >&2; exit 2; }
 # 主工作树根：--git-common-dir 在主仓返回 .git、在 worktree 返回主仓的 .git，两种情形都能推回主仓。
 main_root() {
     local cdir
-    cdir=$(git rev-parse --git-common-dir 2>/dev/null) || die "wt: 当前目录不在 git 仓库里（cwd=$PWD）"
+    cdir=$(git rev-parse --git-common-dir 2>/dev/null) || die "wt: 当前目录不在 git 仓库里（cwd=${PWD}）"
     ( cd "$(dirname "$(cd "$cdir" && pwd -P)")" && pwd -P )
 }
 
@@ -80,29 +105,67 @@ wt_path_of() {
     esac
 }
 
+is_registered() { git -C "$1" worktree list --porcelain | grep -qxF "worktree $2"; }
+has_origin()    { git -C "$1" remote get-url origin >/dev/null 2>&1; }
+
 cmd_path() { [ $# -ge 1 ] || die "用法: wt path <用途>"; wt_path_of "$1"; }
 cmd_main() { main_root; }
 
-# --branch 不给 ref 时的默认基：origin 的默认分支。主树常停在某条功能分支上，若沿用 HEAD，
-# 新分支就叠在别线未合并的提交上（织锦 R2 明令禁止）。stdout 只吐 ref，说明一律走 stderr。
-default_branch_base() {
-    local root=$1 cand
-    if ! git -C "$root" remote get-url origin >/dev/null 2>&1; then
-        echo "wt: 警告 —— 仓库没有 origin，--branch 退回从 HEAD 切（可能叠在别线分支上）" >&2
-        echo HEAD; return
-    fi
-    # GIT_TERMINAL_PROMPT=0：要凭证时直接失败，不卡在交互提示上
-    GIT_TERMINAL_PROMPT=0 git -C "$root" fetch --quiet origin >&2 \
-        || echo "wt: 警告 —— git fetch origin 失败，改用本地已有的 origin 引用（可能不是最新）" >&2
-    for cand in "$(git -C "$root" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)" \
+# fetch 失败一律硬失败：拿滞后的 origin 引用去判「从哪切 / 合没合进去」，结论会是错的（旧版 --branch 只警告、照切）。
+# GIT_TERMINAL_PROMPT=0：要凭证时直接失败，不卡在交互提示上。
+fetch_origin() {
+    GIT_TERMINAL_PROMPT=0 git -C "$1" fetch --quiet origin >&2 \
+        || die "wt: git fetch origin 失败（网络 / 凭证？）—— ${2}，修好再重跑"
+}
+
+# origin 的默认分支（只解析不 fetch）：origin/HEAD 指向 → origin/main → origin/master；都没有输出空。
+origin_default_ref() {
+    local cand
+    for cand in "$(git -C "$1" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)" \
                 origin/main origin/master; do
         [ -n "$cand" ] || continue
-        if git -C "$root" rev-parse --verify --quiet "${cand}^{commit}" >/dev/null; then
+        if git -C "$1" rev-parse --verify --quiet "${cand}^{commit}" >/dev/null; then
             echo "$cand"; return
         fi
     done
-    echo "wt: 警告 —— 找不到 origin 的默认分支（origin/HEAD、origin/main、origin/master 都没有），--branch 退回从 HEAD 切" >&2
-    echo HEAD
+}
+
+# origin 上某个引用的 sha（不存在输出空）；连不上 / 出错返回 1。
+# 逐字比对引用名：ls-remote 的模式按尾部匹配，`ls-remote --heads origin x` 会连 refs/heads/other/x 一起列出（实测）。
+remote_ref_sha() {
+    local out rc=0
+    out=$(GIT_TERMINAL_PROMPT=0 git -C "$1" ls-remote --exit-code origin "$2" 2>/dev/null) || rc=$?
+    case "$rc" in
+        0) printf '%s\n' "$out" | REF="$2" awk -F '\t' '$2 == ENVIRON["REF"] { print $1; exit }' ;;
+        2) ;;   # 远端没有这个引用
+        *) return 1 ;;
+    esac
+}
+remote_branch_sha() { remote_ref_sha "$1" "refs/heads/$2"; }
+
+# 0 = 是祖先，1 = 不是；别的退出码是 git 出错（对象不在本地等）——直接停，不当成「不是」。
+is_ancestor() {
+    local rc=0
+    git -C "$1" merge-base --is-ancestor "$2" "$3" 2>/dev/null || rc=$?
+    case "$rc" in 0|1) return "$rc" ;; esac
+    die "wt: 判断不了 ${2:0:8} 是不是 ${3} 的祖先（git merge-base 出错 rc=${rc}）"
+}
+
+# --branch 的两道门，都在动任何目录之前（拒绝时现场原样不动）：
+#   · 分支已在本地或 origin 存在 → 拒绝。一分支一个写入方：同名分支要么是别人的线，要么是自己没收尾的线；
+#     旧版对只在 origin 上的同名分支会从 origin/main 另切一条同名本地分支，推上去必然非快进。
+#   · 不给 ref 要从最新的 origin 默认分支切：fetch 失败即停。
+check_new_branch() {
+    local root=$1 branch=$2 ref=$3 remote
+    git check-ref-format "refs/heads/$branch" || die "wt new: 分支名不合法：${branch}"
+    if git -C "$root" show-ref --verify --quiet "refs/heads/$branch"; then
+        deny "wt: 拒绝 —— 本地已有分支 ${branch}（一分支一个写入方）。新任务换个分支名；要接着它干活：wt new <用途> ${branch}（detached）后 git -C <树> switch ${branch}"
+    fi
+    has_origin "$root" || return 0
+    [ -n "$ref" ] || fetch_origin "$root" "--branch 不给 ref 时要从最新的 origin 默认分支切"
+    remote=$(remote_branch_sha "$root" "$branch") \
+        || die "wt: 查不了 origin 上有没有分支 ${branch}（git ls-remote 失败：网络 / 凭证？），修好再重跑"
+    [ -z "$remote" ] || deny "wt: 拒绝 —— origin 上已有分支 ${branch} @${remote:0:8}（一分支一个写入方：那条线有人在写，或还没收尾）。要接手它先按换手协议确认，再 wt new <用途> origin/${branch} 后 git -C <树> switch ${branch}"
 }
 
 cmd_new() {
@@ -124,11 +187,36 @@ cmd_new() {
     root=$(main_root) || exit 1
     mkdir -p "$WT_HOME"          # 必须先建：否则 canon 算不出父目录 realpath（首次使用踩过）
     path=$(wt_path_of "$purpose")
+    [ -z "$branch" ] || check_new_branch "$root" "$branch" "$ref"
+
+    # 同名已登记 → 拒绝，不再先拆后建：~/.wt 里有常驻的线级树（每线一棵、换任务在树里切分支），拆它等于拆掉
+    # 那条线的工作现场。空目录照旧顺手清；别的东西一律不碰，不盲 rm -rf。
+    if [ -e "$path" ]; then
+        if is_registered "$root" "$path"; then
+            deny "wt: 拒绝 —— 同名 worktree 已存在 → ${path}（可能是常驻树，不替你拆）
+wt: 常驻树换任务：先 wt done / wt park 收掉当前分支，再 git -C \"${path}\" switch --no-track -c <新分支> origin/main（先 fetch）
+wt: 临时树要重建：先 wt rm ${purpose}"
+        elif [ -z "$(ls -A "$path" 2>/dev/null)" ]; then
+            rmdir "$path"
+        else
+            deny "wt: ${path} 已存在且不是本仓 worktree，拒绝覆盖。人工确认后自行删除。"
+        fi
+    fi
+
     # 只有「给了 --branch 且没给 ref」才改默认基；detached 验证树仍默认 HEAD（验的就是当前改动）。
     # --no-track：从远端引用切时 git 默认会把它设成上游，新分支就去跟踪 main —— 与旧行为（从本地 HEAD 切、无上游）不一致。
     local track_arg=""
     if [ -n "$branch" ] && [ -z "$ref" ]; then
-        ref=$(default_branch_base "$root")
+        if ! has_origin "$root"; then
+            echo "wt: 警告 —— 仓库没有 origin，--branch 退回从 HEAD 切（可能叠在别线分支上）" >&2
+            ref=HEAD
+        else
+            ref=$(origin_default_ref "$root")   # check_new_branch 刚 fetch 过
+            if [ -z "$ref" ]; then
+                echo "wt: 警告 —— 找不到 origin 的默认分支（origin/HEAD、origin/main、origin/master 都没有），--branch 退回从 HEAD 切" >&2
+                ref=HEAD
+            fi
+        fi
         if [ "$ref" = HEAD ]; then
             echo "wt: --branch 未指定 ref，退回从 HEAD 切（原因见上方警告）"
         else
@@ -137,18 +225,6 @@ cmd_new() {
         fi
     fi
     ref=${ref:-HEAD}
-
-    # 幂等前置清理：只清「本仓注册过的 worktree」或「空目录」。别人的东西一律拒绝，不盲 rm -rf。
-    if [ -e "$path" ]; then
-        if git -C "$root" worktree list --porcelain | grep -qxF "worktree $path"; then
-            echo "wt: 同名 worktree 已存在，先拆 → $path"
-            cmd_rm "$path" || deny "wt: 旧 worktree 拆不掉（有未提交改动？）先处理它再重建"
-        elif [ -z "$(ls -A "$path" 2>/dev/null)" ]; then
-            rmdir "$path"
-        else
-            deny "wt: ${path} 已存在且不是本仓 worktree，拒绝覆盖。人工确认后自行删除。"
-        fi
-    fi
     git -C "$root" worktree prune
 
     if [ -n "$branch" ]; then
@@ -187,10 +263,12 @@ cmd_new() {
             echo "wt: 警告 —— scripts/wt-post-new.sh 失败（exit ${hook_rc}），worktree 已保留；修好后补跑：wt run $purpose bash scripts/wt-post-new.sh \"$root\" \"$path\"" >&2
         fi
     fi
+    record_hydrated "$path"
 
     echo "wt: 就绪 $path  ($(git -C "$path" rev-parse --short HEAD))"
     echo "wt: 在里面干活用  wt run $purpose <命令>   —— 不要 cd 进去（cwd 悬空是历史第一高频坑）"
     echo "wt: 要留存的产物写主仓  $(main_root)  —— worktree 一拆，里面的东西全没"
+    echo "wt: 收尾：临时树 wt rm ${purpose}；常驻树 wt done / wt park"
 }
 
 cmd_run() {
@@ -228,6 +306,18 @@ cmd_ls() {
     done
 }
 
+# ======================= 拆树的门（rm / park 共用） =======================
+
+# 有未提交内容就拒绝，并列出来；$2 是给人的下一步。
+refuse_if_dirty() {
+    local dirty; dirty=$(wt_dirty "$1")
+    [ -z "$dirty" ] && return 0
+    echo "wt: 拒绝 —— ${1} 里有未提交内容：" >&2
+    printf '%s\n' "$dirty" | head -20 >&2
+    echo "wt: $2" >&2
+    exit 2
+}
+
 # 本仓所有 worktree（主仓 + 其他）里，解析后落在 $2 这棵树内的 symlink；每行「链接 -> 真实目标」。
 # 背景（2026-10-14）：织锦主仓 docs/_wt-* 软链指进 ~/.wt 里的 worktree，wt rm 拆树后线上锚点页全 404。
 # 范围：prune 掉 node_modules/.venv/.next/.git（体积大；.venv/node_modules 是 wt 自己挂回主仓的环境链接），
@@ -247,50 +337,368 @@ symlinks_into_tree() {
     done
 }
 
+# 门：有 symlink 指进这棵树。与 --force 无关：--force 只表示「接受丢未提交内容」，不表示「接受别处的链接悬空」。
+gate_refs() {
+    local root=$1 path=$2 refs
+    command -v realpath >/dev/null || die "wt: 缺 realpath，没法判断有没有 symlink 指进 ${path}，拒绝拆；确认没有引用后加 --ignore-refs"
+    refs=$(symlinks_into_tree "$root" "$path")
+    [ -z "$refs" ] && return 0
+    echo "wt: 拒绝拆 —— 仓库里还有 symlink 指进 ${path}，拆了它们全部悬空（读这些链接的页面/脚本会 404）：" >&2
+    printf '%s\n' "$refs" | head -20 >&2
+    echo "wt: 先把链接改指别处或删掉；确认就是要让它们悬空，加 --ignore-refs 重跑" >&2
+    exit 2
+}
+
+# 门：游离提交——HEAD 上有、任何分支 / tag / 远端引用都够不着的提交。树一拆，它的 HEAD reflog 随登记目录一起删掉，
+# 这些提交就只剩「等 gc 回收」。树在分支上时 HEAD 就是分支，这里恒为空。
+gate_detached() {
+    local path=$1 lost
+    lost=$(git -C "$path" rev-list HEAD --not --branches --tags --remotes) \
+        || deny "wt: 拒绝 —— 判断不了 ${path} 有没有游离提交（git rev-list 出错）"
+    [ -z "$lost" ] && return 0
+    echo "wt: 拒绝 —— ${path} 的 HEAD 上有 $(printf '%s\n' "$lost" | wc -l | tr -d ' ') 个提交不在任何分支 / tag / 远端引用上，拆了就只剩等 gc 回收：" >&2
+    git -C "$path" log --oneline --no-decorate -5 HEAD --not --branches --tags --remotes >&2
+    echo "wt: 要留：git -C \"${path}\" switch -c <分支名>（或打 tag）；确定不要：先 git -C \"${path}\" switch --detach <别的 ref> 再重跑" >&2
+    exit 2
+}
+
+# 只提醒：分支上有不在任何远端的提交。wt rm 不删分支，提交还在本地分支上，不会丢。
+warn_unpushed() {
+    local path=$1 b n
+    b=$(git -C "$path" symbolic-ref --quiet --short HEAD) || return 0   # detached 由 gate_detached 管
+    if ! n=$(git -C "$path" rev-list --count HEAD --not --remotes 2>/dev/null); then
+        echo "wt: 提醒 —— 判断不了分支 ${b} 有没有未推送的提交（git rev-list 出错）" >&2
+        return 0
+    fi
+    [ "$n" = 0 ] || echo "wt: 提醒 —— 分支 ${b} 上有 ${n} 个提交不在任何远端；wt rm 不删分支，它们还在本地分支 ${b} 上" >&2
+}
+
+# 有进程在用这棵树：cwd 在树里，或开着树里的文件（含映射进内存的）。全量 lsof 再按 NAME 前缀过滤——
+#   不用 lsof +D（大树上要几分钟）；也不只看 cwd：2026-10-16 织锦清理实证，占住树的是 Docker 后端开着的
+#   config.yml 文件句柄，cwd 根本不在树里。别的会话每条命令只短暂进出，单次快照会漏，所以采样 3 次取并集。
+# 只排除 wt 自己（lsof 在 cd / 之后跑）：调用方 shell 的 cwd 若在树里照样算命中——拆了它就悬空（第 1 类坑）。
+# Spotlight / fseventsd 只读索引、不阻碍删除，不算。lsof 在非 UTF-8 locale 下把中文路径打成 \xHH，所以钉 UTF-8。
+# 输出「pid<TAB>命令<TAB>fd<TAB>路径」；lsof 一行都没吐（跑不起来）返回 1。
+tree_handles() {
+    local tree=$1 self="$$ ${BASHPID:-$$}" i raw all=""
+    for i in 1 2 3; do
+        [ "$i" = 1 ] || sleep "${WT_LSOF_GAP:-1}"
+        raw=$(cd / && LC_ALL=en_US.UTF-8 lsof -nP -F pcfn 2>/dev/null)
+        [ -n "$raw" ] || return 1
+        all+=$(printf '%s\n' "$raw" | T="$tree" SELF="$self" LC_ALL=C awk '
+            BEGIN { t = ENVIRON["T"]; tl = length(t); n = split(ENVIRON["SELF"], s, " "); for (k = 1; k <= n; k++) self[s[k]] = 1 }
+            /^p/ { pid = substr($0, 2); next }
+            /^c/ { cmd = substr($0, 2); next }
+            /^f/ { fd = substr($0, 2); next }
+            /^n/ {
+                if (pid in self || cmd ~ /^(mds|mds_stores|mdworker|mdworker_shared|fseventsd)$/) next
+                name = substr($0, 2)
+                if (name == t || substr(name, 1, tl + 1) == t "/") print pid "\t" cmd "\t" fd "\t" name
+            }')$'\n'
+    done
+    printf '%s' "$all" | sed '/^$/d' | sort -u
+}
+
+gate_handles() {
+    local path=$1 hits
+    command -v lsof >/dev/null || deny "wt: 拒绝拆 —— 缺 lsof，没法确认有没有进程在用 ${path}"
+    hits=$(tree_handles "$path") || deny "wt: 拒绝拆 —— lsof 没有输出，没法确认有没有进程在用 ${path}"
+    [ -z "$hits" ] && return 0
+    echo "wt: 拒绝拆 —— 有进程在用 ${path}（cwd 在里面，或开着里面的文件；拆了它们拿着悬空的句柄接着写）：" >&2
+    printf '%s\n' "$hits" | head -20 | awk -F '\t' '{ printf "  pid=%s %s [%s] %s\n", $1, $2, $3, $4 }' >&2
+    echo "wt: 先停掉这些进程或让它们离开这棵树（是你自己的 shell 就先 cd 出去），再重跑" >&2
+    exit 2
+}
+
+# ---- 被忽略文件：哪些拆了会永久丢 ----
+
+# 树里被 .gitignore 挡住的条目，每行一个（目录带尾斜杠）。用 status --ignored=matching：只列真正命中忽略规则的
+# 那一层、被忽略的整个目录只出一行——ls-files -o -i --directory 还会把「内容全被忽略」的父目录也列出来（实测）。
+# -z：中文文件名不被转义成 "\345\210\233"。--no-optional-locks：只读检查，不去抢树的 index 锁。
+ignored_entries() {
+    local raw
+    raw=$(git --no-optional-locks -C "$1" status --ignored=matching --porcelain=v1 --untracked-files=normal -z | tr '\0' '\n') || return 1
+    printf '%s\n' "$raw" | sed -n 's/^!! //p'
+}
+
+# 建树时就有的被忽略条目 = 补灌产物（wt 的环境链接 + 仓库钩子补的种子库 / 快照……）。记在 worktree 的登记目录
+# （<主仓>/.git/worktrees/<名>/wt-hydrated）：不弄脏树，随树一起拆掉。wt rm 据此认定它们可再生。
+hydrated_record() {
+    local gd; gd=$(git -C "$1" rev-parse --absolute-git-dir 2>/dev/null) || return 1
+    printf '%s/wt-hydrated\n' "$gd"
+}
+record_hydrated() {
+    local record
+    if record=$(hydrated_record "$1") && ignored_entries "$1" > "$record"; then return 0; fi
+    echo "wt: 警告 —— 没记下补灌产物清单（${record:-登记目录找不到}）；wt rm 会把它们当不可再生的文件拦下，届时看清后用 --ignored-ok" >&2
+}
+
+is_regen_name() {   # $1 相对路径（不带尾斜杠）
+    local name
+    for name in "${REGEN_DIR_NAMES[@]}"; do
+        case "/$1/" in */"$name"/*) return 0 ;; esac
+    done
+    for name in "${REGEN_FILE_GLOBS[@]}"; do
+        # shellcheck disable=SC2254  # 故意不加引号：$name 是 glob
+        case "${1##*/}" in $name) return 0 ;; esac
+    done
+    return 1
+}
+
+# 主仓同一相对路径有逐字节相同的文件：树里这份是拷贝，拆了不丢东西（织锦钩子 cp -p 进来、没再动过的门快照）。
+same_as_main() { [ -f "$1/$3" ] && cmp -s "$1/$3" "$2/$3"; }
+
+# 被忽略目录 $3 里不可再生的文件（相对树根），每行一个。symlink 不是 -type f，天然跳过。
+nonregen_files_in() {
+    local root=$1 tree=$2 dir=$3 record name f rel prune=() keep=()
+    for name in "${REGEN_DIR_NAMES[@]}"; do prune+=(-o -name "$name"); done
+    for name in "${REGEN_FILE_GLOBS[@]}"; do keep+=(! -name "$name"); done
+    record=$(hydrated_record "$tree") || return 1
+    find "$tree/$dir" \( "${prune[@]:1}" \) -prune -o -type f "${keep[@]}" -print \
+        | while IFS= read -r f; do
+            rel=${f#"$tree"/}
+            if [ -f "$record" ] && grep -qxF -- "$rel" "$record"; then continue; fi
+            same_as_main "$root" "$tree" "$rel" || printf '%s\n' "$rel"
+        done
+}
+
+# 不可再生的被忽略条目（拆树会永久丢的），每行一个。可再生的五种：缓存名 · symlink（里面没有数据，拆树只删链接本身）·
+# 建树时记下的补灌产物 · 与主仓同路径文件逐字节相同 · 目录里只有前几种。git 出错返回 1（调用方按拒绝处理）。
+nonregen_entries() {
+    local root=$1 tree=$2 listing record entry rel
+    listing=$(ignored_entries "$tree") || return 1
+    record=$(hydrated_record "$tree") || return 1
+    [ -n "$listing" ] || return 0
+    printf '%s\n' "$listing" | while IFS= read -r entry; do
+        rel=${entry%/}
+        is_regen_name "$rel" && continue
+        [ -L "$tree/$rel" ] && continue
+        if [ -f "$record" ] && grep -qxF -- "$entry" "$record"; then continue; fi
+        if [ -d "$tree/$rel" ]; then
+            [ -n "$(nonregen_files_in "$root" "$tree" "$rel" | head -n 1)" ] || continue
+        elif same_as_main "$root" "$tree" "$rel"; then
+            continue
+        fi
+        printf '%s\n' "$entry"
+    done
+}
+
+deny_ignored() {   # $1 树 $2 用途 $3 条目
+    local tree=$1 label=$2 entries=$3 entry n
+    n=$(printf '%s\n' "$entries" | wc -l | tr -d ' ')
+    echo "wt: 拒绝拆 —— ${tree} 里有 ${n} 项被 git 忽略、又不可再生的文件（git 不管它们，拆树就永久没了）：" >&2
+    printf '%s\n' "$entries" | head -20 | while IFS= read -r entry; do
+        printf '  %6s  %s\n' "$(du -sh "$tree/${entry%/}" 2>/dev/null | cut -f1)" "$entry" >&2
+    done
+    [ "$n" -le 20 ] || echo "  …（共 ${n} 项，只列了前 20）" >&2
+    echo "wt: 要留：wt rm ${label} --export-ignored（按相对路径拷到 ${WT_EVIDENCE_HOME}/<日期>-wt-<树目录名>/，附 sha256 清单）" >&2
+    echo "wt: 确认都不要：wt rm ${label} --ignored-ok" >&2
+    exit 2
+}
+
+# 把不可再生的被忽略文件按相对路径拷进证据目录，附 sha256 清单：清单算的是源文件，拷完在目标侧 shasum -c 回验。
+# 证据目录 $WT_EVIDENCE_HOME/<YYYY-MM-DD>-<wt|park>-<树目录名>/；同名已存在就加时分秒另起，绝不覆盖已有证据。
+# 输出证据目录；任何一步失败 die（调用方据此不拆树）。
+export_ignored() {
+    local root=$1 tree=$2 kind=$3 entries=$4 dest
+    dest="$WT_EVIDENCE_HOME/$(date +%Y-%m-%d)-${kind}-$(basename "$tree")"
+    [ ! -e "$dest" ] || dest="${dest}-$(date +%H%M%S)"
+    [ ! -e "$dest" ] || die "wt: 证据目录 ${dest} 已存在，不覆盖；过一秒重跑"
+    mkdir -p "$dest" || die "wt: 建不了证据目录 ${dest}，没拆树"
+    printf '%s\n' "$entries" | while IFS= read -r entry; do
+        if [ -d "$tree/${entry%/}" ]; then nonregen_files_in "$root" "$tree" "${entry%/}"; else printf '%s\n' "${entry%/}"; fi
+    done | while IFS= read -r f; do
+        { ( cd "$tree" && shasum -a 256 -- "$f" ) >> "$dest/MANIFEST.sha256" \
+            && mkdir -p "$dest/$(dirname "$f")" && cp -p "$tree/$f" "$dest/$f"; } || exit 1
+    done || die "wt: 导出到 ${dest} 失败（见上），没拆树"
+    ( cd "$dest" && shasum -a 256 -c --quiet MANIFEST.sha256 ) >&2 || die "wt: ${dest} 的 sha256 回验不过，没拆树"
+    printf '%s\n' "$dest"
+}
+
+# 拆树本体（门都过了之后）。wt 自己挂的环境链接（.venv / node_modules）在多数仓里是「未跟踪」而不是「被忽略」——
+# .gitignore 的 `.venv/` 尾斜杠只匹配目录、不匹配 symlink（实测）——git worktree remove 见了就拒绝，旧版因此常年
+# 落进 rm -rf 兜底。先摘掉这几条链接；剩下 git 还拒绝的就是真问题（树被 git worktree lock / 有子模块 / 门没看见的改动）：
+# 停下报原因，不再硬删，摘下的链接原样挂回。
+do_remove() {
+    local root=$1 path=$2 force=$3 nm dest links="" err rmargs=""
+    for nm in .venv node_modules frontend/node_modules; do
+        [ -L "$path/$nm" ] || continue
+        links+="${nm}"$'\t'"$(readlink "$path/$nm")"$'\n'
+        rm "$path/$nm"
+    done
+    [ "$force" -eq 0 ] || rmargs="--force"
+    # shellcheck disable=SC2086  # rmargs 为空时必须展开成零个参数
+    if ! err=$(git -C "$root" worktree remove $rmargs "$path" 2>&1); then
+        printf '%s' "$links" | while IFS=$'\t' read -r nm dest; do ln -s "$dest" "$path/$nm"; done
+        echo "wt: 拒绝 —— git worktree remove 不肯拆 ${path}：" >&2
+        printf '%s\n' "$err" >&2
+        echo "wt: 不再兜底 rm -rf（拆不掉总有原因：树被 git worktree lock / 有子模块 / 有门没看见的改动），按上面的原因处理后重跑" >&2
+        exit 2
+    fi
+    git -C "$root" worktree prune
+}
+
 cmd_rm() {
-    local force=0 ignore_refs=0 target=""
+    local force=0 ignore_refs=0 ignored_mode="" target=""
     while [ $# -gt 0 ]; do
         case "$1" in
             --force|-f)    force=1; shift ;;
             --ignore-refs) ignore_refs=1; shift ;;
+            --export-ignored|--ignored-ok)
+                [ -z "$ignored_mode" ] || die "wt rm: --export-ignored 与 --ignored-ok 二选一"
+                ignored_mode=$1; shift ;;
+            -*)            die "wt rm: 未知参数 ${1}（可用：--force --ignore-refs --export-ignored --ignored-ok）" ;;
             *)             target=$1; shift ;;
         esac
     done
-    [ -n "$target" ] || die "用法: wt rm <用途|路径> [--force] [--ignore-refs]"
-    local root path; root=$(main_root) || exit 1
+    [ -n "$target" ] || die "用法: wt rm <用途|路径> [--force] [--ignore-refs] [--export-ignored|--ignored-ok]"
+    local root path entries evidence
+    root=$(main_root) || exit 1
     path=$(wt_path_of "$target")
     [ "$path" != "$root" ] || deny "wt: 拒绝拆主工作树"
-
-    # 门 1：有 symlink 指进这棵树。与 --force 无关：--force 只表示「接受丢未提交内容」，不表示「接受别处的链接悬空」。
-    if [ -d "$path" ] && [ "$ignore_refs" -eq 0 ]; then
-        command -v realpath >/dev/null || die "wt: 缺 realpath，没法判断有没有 symlink 指进 ${path}，拒绝拆；确认没有引用后加 --ignore-refs"
-        local refs; refs=$(symlinks_into_tree "$root" "$path")
-        if [ -n "$refs" ]; then
-            echo "wt: 拒绝拆 —— 仓库里还有 symlink 指进 ${path}，拆了它们全部悬空（读这些链接的页面/脚本会 404）：" >&2
-            printf '%s\n' "$refs" | head -20 >&2
-            echo "wt: 先把链接改指别处或删掉；确认就是要让它们悬空再 wt rm $target --ignore-refs" >&2
-            exit 2
-        fi
+    if [ ! -e "$path" ]; then
+        is_registered "$root" "$path" || die "wt: 没有这棵 worktree → ${path}"
+        git -C "$root" worktree prune
+        echo "wt: ${path} 目录早已不在，只清掉了残留登记"
+        return 0
     fi
+    is_registered "$root" "$path" || deny "wt: 拒绝 —— ${path} 不是本仓登记的 worktree，不动它（旧版这里会 rm -rf）"
 
-    if [ -d "$path" ] && [ "$force" -eq 0 ]; then
-        local dirty; dirty=$(wt_dirty "$path")
-        if [ -n "$dirty" ]; then
-            echo "wt: 拒绝拆 —— ${path} 里有未提交内容，删了就永久没了：" >&2
-            printf '%s\n' "$dirty" | head -20 >&2
-            echo "wt: 想留就先搬进主仓 ${root}，确认要丢再 wt rm $target --force" >&2
-            exit 2
-        fi
+    [ "$ignore_refs" -eq 1 ] || gate_refs "$root" "$path"
+    [ "$force" -eq 1 ] || refuse_if_dirty "$path" "删了就永久没了。想留就先搬进主仓 ${root}，确认要丢再 wt rm $target --force"
+    gate_detached "$path"
+    warn_unpushed "$path"
+    entries=$(nonregen_entries "$root" "$path") || deny "wt: 拒绝拆 —— 判断不了 ${path} 里被忽略的文件（git status 出错）"
+    [ -z "$entries" ] || [ -n "$ignored_mode" ] || deny_ignored "$path" "$target" "$entries"
+    gate_handles "$path"   # 放在最后：离真正拆树最近
+    if [ -n "$entries" ] && [ "$ignored_mode" = --export-ignored ]; then
+        evidence=$(export_ignored "$root" "$path" wt "$entries") || exit 1
+        echo "wt: 不可再生的被忽略文件已导出 → ${evidence}"
     fi
-    local rmargs=""
-    [ "$force" -eq 1 ] && rmargs="--force"
-    # shellcheck disable=SC2086
-    git -C "$root" worktree remove $rmargs "$path" 2>/dev/null \
-        || { rm -rf "$path"; git -C "$root" worktree prune; }
-    git -C "$root" worktree prune
+    do_remove "$root" "$path" "$force"
     echo "wt: 已拆 $path"
-    # cwd 逃逸提示：调用方 shell 若正好停在里面（不该发生，但兜一手）
+    # cwd 逃逸提示：调用方 shell 若正好停在里面（gate_handles 会先拦下；lsof 漏看时兜一手）
     case "$PWD" in "$path"|"$path"/*) echo "wt: 当前 shell 的 cwd 在已删目录里，请 cd $root" >&2 ;; esac
+}
+
+# ======================= 常驻树收尾 / 暂停 =======================
+
+# done / park 的目标：本仓登记过、目录还在、不是主工作树。
+target_tree() {
+    local root=$1 path
+    path=$(wt_path_of "$2")
+    [ "$path" != "$root" ] || deny "wt: 主工作树不归 wt done / park 管"
+    [ -d "$path" ] || die "wt: worktree 不存在 → ${path}"
+    is_registered "$root" "$path" || deny "wt: ${path} 不是本仓登记的 worktree"
+    printf '%s\n' "$path"
+}
+
+# 常驻线级树做完一个任务：分支确认已合入后删掉，树停在最新主干上等下一个任务。
+# 只认祖先关系、不认 gh 的 MERGED：PR 一律 merge commit 合入，tip 是主干祖先就说明它整个进去了；
+# 而 base 不是 main 的 PR 合并后 gh 同样显示 MERGED（2026-10-16 织锦清理实证）。
+cmd_done() {
+    [ $# -eq 1 ] || die "用法: wt done <用途|路径>"
+    local root path b tip base remote
+    root=$(main_root) || exit 1
+    path=$(target_tree "$root" "$1") || exit $?
+    has_origin "$root" || die "wt done: 仓库没有 origin，判断不了分支有没有合进主干"
+    fetch_origin "$root" "wt done 要按最新的 origin 判断合没合进去"
+    refuse_if_dirty "$path" "收尾前先提交（或搬走）"
+    b=$(git -C "$path" symbolic-ref --quiet --short HEAD) || deny "wt done: ${path} 是 detached，没有要收尾的分支"
+    base=$(origin_default_ref "$root")
+    [ -n "$base" ] || die "wt done: 找不到 origin 的默认分支（origin/HEAD、origin/main、origin/master 都没有）"
+    tip=$(git -C "$path" rev-parse HEAD) || die "wt done: 读不出 ${path} 的 HEAD"
+    is_ancestor "$root" "$tip" "$base" \
+        || deny "wt done: 分支 ${b} @${tip:0:8} 还不是 ${base} 的祖先（没合进去，或合进了别的 base）—— 没合完别收尾；要暂停走 wt park"
+    remote=$(remote_branch_sha "$root" "$b") || die "wt done: 查不了 origin/${b}（git ls-remote 失败），修好再重跑"
+    if [ -n "$remote" ]; then
+        is_ancestor "$root" "$remote" "$base" \
+            || deny "wt done: origin/${b} @${remote:0:8} 上有没合进 ${base} 的提交（合并之后又推过？）—— 先查清再收尾"
+    fi
+    git -C "$path" switch --quiet --detach "$base" || die "wt done: switch --detach ${base} 失败（见上），分支没动"
+    git -C "$path" branch -d "$b" \
+        || die "wt done: git branch -d ${b} 被拒（见上；绝不 -D）—— 树已停在 ${base}，分支还在，查清后手动处理"
+    echo "wt: 已收尾 ${b}（@${tip:0:8} 已在 ${base} 里）"
+    [ -z "$remote" ] || echo "wt: origin/${b} 还在（已合入；要删：git push origin --delete ${b}）"
+    echo "wt: 树 ${path} 停在 ${base} @$(git -C "$path" rev-parse --short HEAD)（detached）"
+    echo "wt: 下一个任务：git -C \"${path}\" switch -c <新分支>   （从这里切 = 从刚 fetch 的 ${base} 切）"
+}
+
+# 暂停一条线：tag 存档 → 拆树 → 删分支。tag 消息本身就是恢复清单（与织锦已有的 archive/* tag 同族）。
+# 中途任何一步失败都停在「tag 已推、东西还在」的安全侧；重跑会复用同一个 tag。
+cmd_park() {
+    local target="" reason="" ignore_refs=0
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --reason)      reason="${2:?--reason 需要原因}"; shift 2 ;;
+            --ignore-refs) ignore_refs=1; shift ;;
+            -*)            die "wt park: 未知参数 ${1}（可用：--reason <原因> --ignore-refs）" ;;
+            *)             target=$1; shift ;;
+        esac
+    done
+    { [ -n "$target" ] && [ -n "$reason" ]; } || die "用法: wt park <用途|路径> --reason <原因> [--ignore-refs]"
+    local root path b tip remote tag peeled entries evidence=""
+    root=$(main_root) || exit 1
+    path=$(target_tree "$root" "$target") || exit $?
+    has_origin "$root" || die "wt park: 仓库没有 origin —— park 要把归档 tag 推上去"
+    fetch_origin "$root" "wt park 要先核对 origin 上的分支"
+    refuse_if_dirty "$path" "暂停前先提交（WIP 提交也行）再 park"
+    if ! b=$(git -C "$path" symbolic-ref --quiet --short HEAD); then
+        gate_detached "$path"
+        deny "wt park: ${path} 是 detached 且没有独有提交 —— 没有分支可归档，直接 wt rm ${target}"
+    fi
+    tip=$(git -C "$path" rev-parse HEAD) || die "wt park: 读不出 ${path} 的 HEAD"
+    # 远端分支要删，删之前它必须正好是归档的那个提交：落后 → 先推；有本地没有的提交 → 单写入方被破坏，停
+    remote=$(remote_branch_sha "$root" "$b") || die "wt park: 查不了 origin/${b}（git ls-remote 失败），修好再重跑"
+    if [ -n "$remote" ] && [ "$remote" != "$tip" ]; then
+        if is_ancestor "$root" "$remote" "$tip"; then
+            deny "wt park: 本地 ${b} 领先 origin/${b}（@${remote:0:8}）—— 先 git push origin ${b}（快进）再 park"
+        fi
+        deny "wt park: origin/${b} @${remote:0:8} 上有本地没有的提交（单写入方被破坏？）—— 先查清是谁推的，别只归档一半"
+    fi
+
+    tag="archive/paused/$(date +%Y%m%d)/${b}"
+    git check-ref-format "refs/tags/${tag}" || die "wt park: tag 名不合法：${tag}"
+    if git -C "$root" rev-parse --verify --quiet "refs/tags/${tag}" >/dev/null; then
+        [ "$(git -C "$root" cat-file -t "refs/tags/${tag}")" = tag ] || deny "wt park: ${tag} 已存在但不是 annotated tag，不动它"
+        [ "$(git -C "$root" rev-parse "refs/tags/${tag}^{commit}")" = "$tip" ] || deny "wt park: ${tag} 已存在且指向别的提交，不覆盖"
+        echo "wt: 复用已有 tag ${tag}"
+    else
+        git -C "$root" tag -a "$tag" -m "archive: ${b} @ ${tip} — ${reason}" "$tip" || die "wt park: 打 tag 失败（见上）"
+    fi
+    GIT_TERMINAL_PROMPT=0 git -C "$root" push --quiet origin "refs/tags/${tag}" \
+        || die "wt park: 推 ${tag} 失败（见上）；本地 tag 留着，修好后重跑 wt park（会复用）"
+    peeled=$(remote_ref_sha "$root" "refs/tags/${tag}^{}") || die "wt park: 回读远端 ${tag} 失败（git ls-remote）；没拆树、没删分支"
+    [ "$peeled" = "$tip" ] || die "wt park: 远端 ${tag} 指向 ${peeled:-<没有>}，不是 ${tip}；没拆树、没删分支"
+
+    entries=$(nonregen_entries "$root" "$path") || deny "wt park: 判断不了 ${path} 里被忽略的文件（git status 出错），没拆树"
+    if [ -n "$entries" ]; then
+        evidence=$(export_ignored "$root" "$path" park "$entries") || exit 1
+        echo "wt: 不可再生的被忽略文件已导出 → ${evidence}"
+    fi
+    # 拆树走 wt rm 同一套门；被忽略文件刚导出过，不再拦。子 shell：门的 exit 只结束这一段，好补一句 park 的现场说明。
+    if ! (
+        [ "$ignore_refs" -eq 1 ] || gate_refs "$root" "$path"
+        gate_handles "$path"
+        do_remove "$root" "$path" 0
+    ); then
+        echo "wt park: 树没拆成（原因见上）—— tag ${tag} 已推、分支没动；处理后重跑 wt park ${target} --reason …（tag 会复用）" >&2
+        exit 2
+    fi
+
+    # 删分支前最后核一次：tag 指向的正是分支此刻的 tip
+    [ "$(git -C "$root" rev-parse "refs/tags/${tag}^{commit}")" = "$(git -C "$root" rev-parse --verify --quiet "refs/heads/${b}")" ] \
+        || die "wt park: 分支 ${b} 在 park 过程中动过（不再等于 ${tag}），没删分支"
+    git -C "$root" update-ref -d "refs/heads/${b}" "$tip" || die "wt park: 删本地分支 ${b} 失败（见上）"
+    # 上游配置随分支一起清（同 git branch -D 的行为）；没有这一节时 git 报错，忽略即可
+    git -C "$root" config --remove-section "branch.${b}" 2>/dev/null
+    if [ -n "$remote" ]; then
+        # --force-with-lease 配 --delete 是「比较后删除」：远端此刻仍是归档的那个提交才删，不是强推
+        GIT_TERMINAL_PROMPT=0 git -C "$root" push --quiet --force-with-lease="refs/heads/${b}:${tip}" origin --delete "refs/heads/${b}" \
+            || die "wt park: 远端分支 ${b} 没删掉（见上）—— tag 已推、树已拆、本地分支已删；查清后手动 git push origin --delete ${b}"
+    fi
+    echo "wt: 已暂停 ${b} → ${tag}（@${tip:0:8}，已推 origin 并回读核对）"
+    echo "wt: 恢复：wt new <用途> --branch ${b} ${tag}"
 }
 
 # 孤儿树里还有没有「对象库里找不到」的内容。孤儿的 index/HEAD 随登记目录一起没了，git status 跑不起来——
@@ -352,6 +760,8 @@ case "${1:-}" in
     run)  shift; cmd_run  "$@" ;;
     ls)   shift; cmd_ls   "$@" ;;
     rm)   shift; cmd_rm   "$@" ;;
+    done) shift; cmd_done "$@" ;;
+    park) shift; cmd_park "$@" ;;
     gc)   shift; cmd_gc   "$@" ;;
     path) shift; cmd_path "$@" ;;
     main) shift; cmd_main "$@" ;;

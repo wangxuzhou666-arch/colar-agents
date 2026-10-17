@@ -7,7 +7,16 @@
 #   B3 不带 --branch → detached 在 HEAD，不受新逻辑影响
 #   B4 仓库没有 origin → 退回 HEAD，stderr 有警告
 #   B5 origin/HEAD 缺失 → 依次试 origin/main
-#   B6 fetch 失败 → 只警告，用本地已有的 origin/main（滞后的那个）
+#   B6 fetch 失败 → 硬失败（exit 1）、不建树（2026-10-17 起；旧版只警告、拿滞后的 origin/main 照切）
+#
+# 2026-10-17「一分支一个写入方」+「常驻树不替你拆」：
+#   N1  分支已在本地存在 → exit 2、不建树
+#   N2  分支只在 origin 上存在 → exit 2、不建树（旧版会从 origin/main 另切一条同名分支，推上去必然非快进）
+#   N2b origin 上只有 team/<名>（ls-remote 尾部匹配会误命中）→ 不误拒
+#   N3  显式给 ref、origin 连不上 → ls-remote 失败即 exit 1、不建树
+#   N4  同名 worktree 已登记 → exit 2、树原样不动（里面的文件还在）、提示 switch --no-track -c
+#   N5  分支检查先于任何动目录的动作：同名空目录 + 分支已存在 → 按分支拒绝，空目录也没被 rmdir
+#   N6  分支名不合法 → exit 1
 #
 # 跑法：bash scripts/hooks/tests/test_wt_new_branch_base.sh
 # 变异验证：WT=<改坏一条规则的副本> bash 本脚本 → 对应用例必须转红，否则该用例没有判别力。
@@ -90,8 +99,8 @@ bad() {
   fail=$((fail + 1))
   echo "FAIL $1"
   echo "   rc=$RC"
-  echo "   stdout: $(tr '\n' '|' < "$OUT")"
-  echo "   stderr: $(tr '\n' '|' < "$ERR")"
+  echo "   stdout: $(LC_ALL=C tr '\n' '|' < "$OUT")"
+  echo "   stderr: $(LC_ALL=C tr '\n' '|' < "$ERR")"
 }
 
 # 前置自检：场景真的成立（功能分支领先 main、滞后的 origin/main 与远端 main 不同），否则下面的用例没有判别力
@@ -131,10 +140,61 @@ run_wt "$NOHEAD" new b5 --branch y5
 if [ "$RC" = 0 ] && [ "$(tip "$WT_HOME/nohead-b5")" = "$MAIN_TIP" ]; then ok; else
   bad "B5 origin/HEAD 缺失 → 回落到 origin/main"; fi
 
-# ---- B6：fetch 失败 → 警告 + 用本地已有的 origin/main ----
+# ---- B6：fetch 失败 → 硬失败、不建树（滞后的 origin/main 切出来的分支一出生就落后）----
 run_wt "$DEADREMOTE" new b6 --branch y6
-if [ "$RC" = 0 ] && [ "$(tip "$WT_HOME/deadremote-b6")" = "$STALE_MAIN" ] \
-   && grep -qF 'fetch origin 失败' "$ERR"; then ok; else bad "B6 fetch 失败 → 只警告，用本地 origin/main"; fi
+if [ "$RC" = 1 ] && [ ! -e "$WT_HOME/deadremote-b6" ] && grep -qF 'fetch origin 失败' "$ERR" \
+   && ! git -C "$DEADREMOTE" show-ref --verify --quiet refs/heads/y6; then ok; else
+  bad "B6 fetch 失败 → exit 1、不建树、不建分支"; fi
+
+# ======== 一分支一个写入方 / 常驻树不替你拆 ========
+# origin 上：只在远端的分支 remote-only；以及 team/y7（用来验 ls-remote 尾部匹配不误拒裸名 y7）
+git -C "$SEED" push -q origin main:refs/heads/remote-only main:refs/heads/team/y7
+
+# ---- N1：本地已有分支 ----
+run_wt "$LOCAL" new n1 --branch feature
+if [ "$RC" = 2 ] && [ ! -e "$WT_HOME/local-n1" ] && grep -qF '本地已有分支 feature' "$ERR"; then ok; else
+  bad "N1 分支已在本地存在 → exit 2、不建树"; fi
+
+# ---- N2：分支只在 origin 上 ----
+run_wt "$LOCAL" new n2 --branch remote-only
+if [ "$RC" = 2 ] && [ ! -e "$WT_HOME/local-n2" ] && grep -qF 'origin 上已有分支 remote-only' "$ERR" \
+   && ! git -C "$LOCAL" show-ref --verify --quiet refs/heads/remote-only; then ok; else
+  bad "N2 分支只在 origin 上 → exit 2、不建树、不建同名本地分支"; fi
+
+# ---- N2b：origin 上只有 team/y7 → 裸名 y7 不算已存在 ----
+run_wt "$LOCAL" new n2b --branch y7
+if [ "$RC" = 0 ] && [ "$(git -C "$WT_HOME/local-n2b" symbolic-ref --short HEAD 2>/dev/null)" = y7 ]; then ok; else
+  bad "N2b origin 上只有 team/y7 → --branch y7 不误拒"; fi
+
+# ---- N3：显式 ref、origin 连不上 → ls-remote 失败即停 ----
+run_wt "$DEADREMOTE" new n3 HEAD --branch y8
+if [ "$RC" = 1 ] && [ ! -e "$WT_HOME/deadremote-n3" ] && grep -qF 'ls-remote 失败' "$ERR"; then ok; else
+  bad "N3 显式 ref + origin 连不上 → exit 1、不建树"; fi
+
+# ---- N4：同名 worktree 已登记 → 拒绝，不拆 ----
+# 标记放在树的登记目录里（.git/worktrees/<名>/）：树保持干净（旧版对干净树会先拆后建），拆过重建标记就没了
+run_wt "$LOCAL" new n4
+N4_MARK="$(git -C "$WT_HOME/local-n4" rev-parse --absolute-git-dir)/n4-marker"
+echo keep > "$N4_MARK"
+N4_TIP=$(tip "$WT_HOME/local-n4")
+run_wt "$LOCAL" new n4 --branch y9
+if [ "$RC" = 2 ] && [ -f "$N4_MARK" ] && [ "$(tip "$WT_HOME/local-n4")" = "$N4_TIP" ] \
+   && grep -qF 'switch --no-track -c' "$ERR" && grep -qF 'wt rm n4' "$ERR" \
+   && ! git -C "$LOCAL" show-ref --verify --quiet refs/heads/y9; then ok; else
+  bad "N4 同名 worktree 已登记 → exit 2、树原样、提示 switch --no-track -c / wt rm"; fi
+run_wt "$LOCAL" new n4
+if [ "$RC" = 2 ] && [ -f "$N4_MARK" ]; then ok; else bad "N4b 不带 --branch 同样拒绝（干净的树也不替你拆）"; fi
+
+# ---- N5：分支检查先于动目录 ----
+mkdir -p "$WT_HOME/local-n5"
+run_wt "$LOCAL" new n5 --branch feature
+if [ "$RC" = 2 ] && grep -qF '本地已有分支' "$ERR" && [ -d "$WT_HOME/local-n5" ]; then ok; else
+  bad "N5 分支已存在 → 按分支拒绝，同名空目录没被 rmdir（检查在任何动目录的动作之前）"; fi
+
+# ---- N6：分支名不合法 ----
+run_wt "$LOCAL" new n6 --branch 'bad..name'
+if [ "$RC" = 1 ] && [ ! -e "$WT_HOME/local-n6" ] && grep -qF '分支名不合法' "$ERR"; then ok; else
+  bad "N6 分支名不合法 → exit 1"; fi
 
 # ---- 隔离自证：本仓真实 config 没被测试碰过 ----
 if [ "$(shasum "$SELF_REPO_CONFIG" 2>/dev/null)" = "$SELF_SUM_BEFORE" ]; then ok; else
