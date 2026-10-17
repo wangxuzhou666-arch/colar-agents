@@ -1,8 +1,8 @@
 ---
 name: wt-discipline
-description: "用 git worktree 做隔离验证/部署/并行分支时的纪律 —— 一律走 `wt` 包装脚本（scripts/wt），落点固定 ~/.wt/<repo>-<用途>，绝不 cd 进 worktree、绝不把要留存的产物写在 worktree 里。治六类实证踩坑：cwd 悬空后满屏 ENOENT · /tmp↔/private/tmp 别名让 remove 失配 · 防御式 rm -rf+prune 仪式 · 产物随 worktree 蒸发（部署史丢过一条）· 落点四处开花 · .venv/node_modules 每次手搭 · 不进 git 的本地产物实测十三样、逐个撞门（素材/node_modules/.venv/种子库/.env/子服务 node_modules/部署史/四个快照记录；一棵新 worktree 跑不绿全量门是构造使然；缺 .env 时门不红但读数悄悄变；.venv 用 symlink 会让 rsync --delete 删掉服务器真实目录；活 sqlite 要用 .backup 不是 cp）· symlink 挂的 .venv 若有 editable install 会让「干净树验证」静默变成在量脏主树 · worktree 只上线 HEAD 造成「本地改了线上没变」。Use when: creating a throwaway worktree to verify a build/test at a specific ref, running a clean-tree deploy, working two branches in parallel, or debugging \"worktree remove 删不掉 / 目录已存在 / No such file or directory / 部署记录不见了 / 干净树上一堆无关测试红\"."
-version: 1.6.0
-source: session-derived (2026-08-18)。全量扫 5297 个 session、200 个含真实 git worktree 操作的会话、288 次调用统计得出；六类失败模式均有现场证据。v1.1.0 (2026-08-19)：织锦一次干净部署实战补第四、五节——三样不进 git 的必补产物（素材/node_modules/.venv）、.venv 用 symlink 会触发 rsync --delete 删服务器真实目录、worktree 只上线 HEAD 导致「本地改了线上没变」。v1.2.0 (2026-09-11)：织锦一次「在干净树上还 check_all 的债」实战——第四样产物（种子库 `data/*.db`，缺了会让十几条无关测试红）、活 sqlite 用 `sqlite3 .backup` 而非 `cp`（2.1GB 实测 3.3s，有并发写仍一致）、以及 symlink 挂 `.venv` 时必须先自证 import 解析到 worktree（否则整轮验证在量主树）。v1.3.0 (2026-09-11，同一轮继续撞)：第四节重写——**一棵新 worktree 跑不绿全量门是构造使然**，按「范围验证（前四样）/ 门级判决（十三样）」分档；补 `.env`（唯一缺了不报错、只让读数悄悄变的一样，symlink 不 cp）、子服务 node_modules、`.deploy-history.jsonl`、四个快照记录；方法论教训：开工前把门的每一道读一眼就能一次列全，逐轮撞要付每轮 6 分半的 pytest。v1.3.1：再补一类不在产物清单里的假红——拿 mtime 当新鲜度判据的门（checkout 会把 mtime 刷成当下），认出来跳过即可。同轮订正了一个错判：我曾因「库 2GB 且在被写」就断言干净树跑不了全量并写进 commit message，实为没想到 `.backup`。v1.3.2 (2026-09-15)：第二节补第四条铁律——要在 worktree 里改依赖，`frontend/node_modules` 必须真实拷贝而非 `wt new` 默认的 symlink（织锦 Next 16.2.10→16.3.5 实证：symlink 下 `npm install` 写的是主仓的库，会当场换掉并行线 dev server 正在用的 node_modules）。v1.6.0 (2026-10-14)：`wt rm` 拆树前扫 symlink 引用（`--ignore-refs` 放行，与 `--force` 独立）；`wt gc` 改为只删正向确认的本仓前 worktree。
+description: "用 git worktree 做隔离验证/部署/并行分支时的纪律 —— 一律走 `wt` 包装脚本（scripts/wt），落点固定 ~/.wt/<repo>-<用途>，绝不 cd 进 worktree、绝不把要留存的产物写在 worktree 里。治六类实证踩坑：cwd 悬空后满屏 ENOENT · /tmp↔/private/tmp 别名让 remove 失配 · 防御式 rm -rf+prune 仪式 · 产物随 worktree 蒸发（部署史丢过一条）· 落点四处开花 · .venv/node_modules 每次手搭 · 不进 git 的本地产物实测十三样、逐个撞门（素材/node_modules/.venv/种子库/.env/子服务 node_modules/部署史/四个快照记录；一棵新 worktree 跑不绿全量门是构造使然；缺 .env 时门不红但读数悄悄变；.venv 用 symlink 会让 rsync --delete 删掉服务器真实目录；活 sqlite 要用 .backup 不是 cp）· symlink 挂的 .venv 若有 editable install 会让「干净树验证」静默变成在量脏主树 · worktree 只上线 HEAD 造成「本地改了线上没变」· 拆树丢东西（被忽略的 handoff / 素材、detached 提交、进程还开着树里的文件）。Use when: creating a throwaway worktree to verify a build/test at a specific ref, running a clean-tree deploy, working two branches in parallel, finishing or parking a resident line tree (wt done / wt park), or debugging \"worktree remove 删不掉 / 目录已存在 / 同名 worktree 已存在 / wt rm 拒绝（有进程在用 / 被忽略文件 / 游离提交）/ No such file or directory / 部署记录不见了 / 干净树上一堆无关测试红\"."
+version: 1.7.0
+source: session-derived (2026-08-18)。全量扫 5297 个 session、200 个含真实 git worktree 操作的会话、288 次调用统计得出；六类失败模式均有现场证据。v1.1.0 (2026-08-19)：织锦一次干净部署实战补第四、五节——三样不进 git 的必补产物（素材/node_modules/.venv）、.venv 用 symlink 会触发 rsync --delete 删服务器真实目录、worktree 只上线 HEAD 导致「本地改了线上没变」。v1.2.0 (2026-09-11)：织锦一次「在干净树上还 check_all 的债」实战——第四样产物（种子库 `data/*.db`，缺了会让十几条无关测试红）、活 sqlite 用 `sqlite3 .backup` 而非 `cp`（2.1GB 实测 3.3s，有并发写仍一致）、以及 symlink 挂 `.venv` 时必须先自证 import 解析到 worktree（否则整轮验证在量主树）。v1.3.0 (2026-09-11，同一轮继续撞)：第四节重写——**一棵新 worktree 跑不绿全量门是构造使然**，按「范围验证（前四样）/ 门级判决（十三样）」分档；补 `.env`（唯一缺了不报错、只让读数悄悄变的一样，symlink 不 cp）、子服务 node_modules、`.deploy-history.jsonl`、四个快照记录；方法论教训：开工前把门的每一道读一眼就能一次列全，逐轮撞要付每轮 6 分半的 pytest。v1.3.1：再补一类不在产物清单里的假红——拿 mtime 当新鲜度判据的门（checkout 会把 mtime 刷成当下），认出来跳过即可。同轮订正了一个错判：我曾因「库 2GB 且在被写」就断言干净树跑不了全量并写进 commit message，实为没想到 `.backup`。v1.3.2 (2026-09-15)：第二节补第四条铁律——要在 worktree 里改依赖，`frontend/node_modules` 必须真实拷贝而非 `wt new` 默认的 symlink（织锦 Next 16.2.10→16.3.5 实证：symlink 下 `npm install` 写的是主仓的库，会当场换掉并行线 dev server 正在用的 node_modules）。v1.6.0 (2026-10-14)：`wt rm` 拆树前扫 symlink 引用（`--ignore-refs` 放行，与 `--force` 独立）；`wt gc` 改为只删正向确认的本仓前 worktree。v1.7.0 (2026-10-17，织锦 git 协作规范 + 10-16 分支清理)：~/.wt 分两种树——登记过的常驻线级树 gc 从不回收、临时树收尾必拆；新增 `wt done`（常驻树收尾）/ `wt park`（暂停：archive tag 存档后拆树删分支）；`wt rm` 加三道门（游离提交 / 有进程在用 / 不可再生的被忽略文件，后者 `--export-ignored` 或 `--ignored-ok` 放行）并删掉 `rm -rf` 兜底；`wt new --branch` 分支已在本地或 origin 存在即拒绝、fetch 失败即停，同名树已登记即拒绝（不再先拆后建）。
 ---
 
 # worktree 纪律
@@ -16,11 +16,21 @@ worktree 的价值是**在不扰动主工作树的前提下拿到某个 ref 的�
 
 ```bash
 wt new <用途> [ref]     # 建到 ~/.wt/<repo>-<用途>，默认 detach（ref 默认 HEAD），自动继承 .venv / node_modules
-wt new <用途> --branch <名>   # 开发分支：不给 ref 时先 fetch，再从 origin 默认分支切（--no-track），不叠在当前分支上
-                              # 显式给 ref（含 HEAD）照用；仓里有 scripts/wt-post-new.sh 就自动跑（补本地产物），--no-hook 跳过
+wt new <用途> --branch <名>   # 开发分支：分支已在本地或 origin 存在 → 拒绝（一分支一个写入方）；不给 ref 时先 fetch
+                              # （失败即停），再从 origin 默认分支切（--no-track）；显式给 ref（含 HEAD）照用
+                              # 仓里有 scripts/wt-post-new.sh 就自动跑（补本地产物），--no-hook 跳过
+                              # 同名树已登记 → 拒绝，不再先拆后建（常驻树会被误拆）
 wt run <用途> <命令...> # 在 worktree 里跑；调用方 cwd 不动
 wt ls                   # 一屏看全：净 / 脏 / 悬空 / 不在 ~/.wt
-wt rm <用途>            # 拆；两道互相独立的拒绝门：有未提交内容（放行用 --force）· 仓库里有 symlink 指进这棵树（放行用 --ignore-refs）
+wt rm <用途>            # 拆临时树。互相独立的拒绝门，各放各的：
+                        #   有未提交内容（--force）· 仓库里有 symlink 指进这棵树（--ignore-refs）·
+                        #   有被 git 忽略、又不可再生的文件（--export-ignored 先导出到 ~/fabric-evidence/<日期>-wt-<树目录名>/
+                        #   附 sha256 清单 / --ignored-ok 确认不要）
+                        #   没有开关的门：detached HEAD 上的游离提交 · 有进程在用（cwd 在里面或开着里面的文件）
+                        #   分支上有没推送的提交只警告（wt rm 不删分支）；git worktree remove 拒绝就停，不再 rm -rf
+wt done <用途>          # 常驻树收尾：分支已合进 origin 默认分支（祖先判定）→ 树停到最新主干（detached）→ git branch -d
+wt park <用途> --reason <原因>   # 暂停：archive/paused/<YYYYMMDD>/<分支> tag 推上去并回读 → 导出不可再生的被忽略文件 →
+                                 # 过 rm 的门拆树 → 删本地分支和远端分支；恢复用 wt new <用途> --branch <分支> <tag>
 wt gc                   # prune 失联记录 + 清 ~/.wt 下「确认是本仓前 worktree」且内容都已入库的孤儿；_ 开头 / 无 .git 文件 / 别仓的一律跳过并列出
 wt main                 # 打印主工作树根（在 worktree 里调用也返回主仓）
 ```
@@ -44,9 +54,20 @@ worktree 是**一次性**的。部署日志、生成的报告、临时写的验�
 脚本里要推主仓根，用 `git rev-parse --git-common-dir` 的父目录（主仓返回 `.git`，worktree 返回主仓的 `.git`，两种都对），
 不要用 `$(dirname $0)/..` 那种相对推断。
 
-**3. `wt rm` 被拒绝时，先看，别条件反射加 `--force` / `--ignore-refs`。**
+**3. `wt rm` 被拒绝时，先看，别条件反射加放行开关。**
 未提交内容被拒：搬回主仓再拆。symlink 引用被拒（主仓或别的 worktree 里有链接解析后落在这棵树里）：拆了它们全部悬空，
-先把链接改指别处或删掉。两个旗标各放行各的，`--force` 不会放行引用。
+先把链接改指别处或删掉。被忽略文件被拒：git 不管它们（`.claude/handoffs/`、生成的素材、本地库），拆树就永久没了——
+要留就 `--export-ignored`，看清了确实不要才 `--ignored-ok`。游离提交被拒：先 `switch -c` 挂上分支。有进程在用被拒：
+停掉列出的进程（是自己的 shell 就先 cd 出去）。各开关只放行各自那一门，`--force` 不会放行别的门。
+
+可再生、不拦的被忽略文件：缓存目录（node_modules / .venv / `__pycache__` / .pytest_cache / .mypy_cache / .ruff_cache / .next）、
+`*.pyc` / `.DS_Store` / `*.tsbuildinfo`、symlink（拆树只删链接本身）、与主仓同路径文件逐字节相同的拷贝，以及
+**建树时就有的**——`wt new` 跑完仓库钩子后把当时的被忽略条目记进 `<主仓>/.git/worktrees/<名>/wt-hydrated`，
+所以织锦钩子补的 demo.db / 门快照不会拦你。v1.7.0 之前建的树没有这份记录：钩子补的库会被列出来，看清后 `--ignored-ok`；
+建树后手工重跑钩子补进来的东西同理。
+
+> 实证（2026-10-16，织锦分支清理）：拆树前要导出的是 `.claude/handoffs/` 与 `data/studio_assets/`（git 不管、
+> 拆了就没）；占住 free-c4a 的是 Docker 后端开着的 `config.yml` 文件句柄，cwd 根本不在树里——只看 cwd 会放行。
 
 > 实证（2026-10-14，织锦）：主仓 `docs/_wt-*` 软链指进 `~/.wt/…/docs`，旧版 `wt rm` 不看引用，拆后线上锚点页 404。
 > 同日 `wt gc` 把根本不是 worktree 的 `~/.wt/_logs` 当孤儿删了——旧判据是「不在登记里 + git status 为空」，
@@ -69,8 +90,10 @@ symlink 指回主仓，worktree 里的 `npm install` 写的就是主仓的 `node
 - **只是想看某个 ref 的某个文件** → `git show <ref>:<path>`，不用建目录。
 - **只是想跑一次测试且主树是干净的** → 直接在主仓跑。worktree 的成本（环境继承、清理、记得产物落点）只有在
   "主树脏 / 要并行 / 要 detach 到历史 ref" 时才划算。
-- **要长期存在的第二个开发环境** → 那不是 throwaway worktree，用正经 clone 或长期分支，别塞进 `~/.wt`
-  （`~/.wt` 的语义是"随时可以 gc 掉"）。
+- **要长期存在的开发环境** → 那是**常驻线级树**（每条线一棵，同时只挂一个任务分支），也落在 `~/.wt`。
+  登记过的常驻树 `wt gc` 从不回收、`wt new` 撞名也不替你拆；任务合入后 `wt done`（树停到最新主干），
+  换任务在树里 `git -C <树> switch --no-track -c <新分支> origin/main`，要暂停就 `wt park --reason`。
+  **临时树**（验证 / 部署 / 公共基础设施改动）收尾必拆：`wt rm`，不留着等 gc。
 
 ## 四、不进 git 的本地产物：不是三样，实测十三样
 
