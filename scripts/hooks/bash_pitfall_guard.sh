@@ -137,18 +137,23 @@ if [ -z "$suggest" ]; then
   esac
 fi
 
-# ---- 规则 9：跳过仓库钩子（--no-verify）/ 强推 ----
+# ---- 规则 9：跳过仓库钩子（--no-verify / 换走 core.hooksPath）/ 强推 ----
 # 2026-10-17 织锦 git 协作规范：多个助理（本机 / 云端 Claude、Codex）共用一个仓，规则的机械层就是仓库钩子
 # （pre-commit / pre-merge-commit / pre-push），--no-verify 一个词让它们全部失效且不留痕；开发分支一律
 # merge origin/main 后快进推送，强推会覆盖别人已推的提交。准入判据的例外同规则 8：后果不可逆 / 绕过无痕，
 # 踩一次就够，不等重踩证据（随 2026-10-17 织锦 git 协作规范计划一并拍板纳入）。
 # 拦：git commit --no-verify / -n、git merge --no-verify、git push --no-verify；git push --force / -f /
-#     --force-with-lease / --force-if-includes / +refspec。不拦：git push -n（--dry-run）、--delete / :分支 删除。
-# 放行：紧贴该条 git 命令写前缀 ALLOW_NO_VERIFY=1 / ALLOW_GIT_FORCE=1，各管各的、只对紧跟的那一条生效。
+#     --force-with-lease / --force-if-includes / --mirror / +refspec。不拦：git push -n（--dry-run）、--delete / :分支 删除。
+#     换钩子目录同属跳钩子：git -c core.hooksPath=… / --config-env[=]core.hooksPath=…（任何子命令、任何值）、
+#     git config [作用域选项] core.hooksPath <值>（值 ≠ .githooks）、git config --unset core.hooksPath（含 set / unset
+#     子命令写法），键不分大小写。不拦：git config [--local] core.hooksPath .githooks（织锦 SessionStart 钩子原句）与只读。
+# 放行：紧贴该条 git 命令写前缀 ALLOW_NO_VERIFY=1（跳钩子 / 换钩子目录）/ ALLOW_GIT_FORCE=1（强推 / --mirror），
+#     各管各的、只对紧跟的那一条生效。
+# 已知边界（宁漏勿误、不追）：长选项缩写（--no-veri / --mirr）、git 别名（git pf）、GIT_CONFIG_* 环境变量与直接改 .git/config 都不检查——兜底是 main 上的服务端 ruleset。
 # 判定在同目录 git_safety_check.py（与规则 8 共用 shell_segments.py 切词）；判定器缺失或异常一律放行。
 if [ -z "$suggest" ]; then
   case "$cmd" in
-    *git*commit*|*git*merge*|*git*push*)
+    *git*commit*|*git*merge*|*git*push*|*[Hh][Oo][Oo][Kk][Ss][Pp][Aa][Tt][Hh]*)
       git_checker="$(dirname "${BASH_SOURCE[0]}")/git_safety_check.py"
       if [ -f "$git_checker" ]; then
         git_hit=$(printf '%s' "$cmd" | python3 "$git_checker" 2>/dev/null | head -n 1 || true)
@@ -157,8 +162,10 @@ if [ -z "$suggest" ]; then
           case "$git_kind" in
             no-verify)
               suggest="命中 ${git_label}：会跳过仓库钩子——secret 门 / main 分支拦截 / 推送规则全部失效，且不留痕。钩子拦下就按它的提示修；仓库给了单项登记口的走登记口（织锦：GATE_SKIP_REASON=\"<kind>: <原因>\"，记进 .gate-skips.jsonl）。确需整体绕过且 Colar 明确同意，在这条 git 命令前紧贴写 ALLOW_NO_VERIFY=1（只对紧跟的这一条生效）" ;;
+            hooks-path)
+              suggest="命中 ${git_label}：把 core.hooksPath 换走或清掉，仓库钩子（secret 门 / main 分支拦截 / 推送规则）就整体不跑、且不留痕；用 git config 写进仓库配置的还会一直生效，之后每个助理的每次提交都跳过钩子。钩子目录只能是 .githooks（git config core.hooksPath .githooks 不拦）。钩子拦下就按它的提示修；单项要跳走仓库的登记口（织锦：GATE_SKIP_REASON=\"<kind>: <原因>\"）。确需绕过且 Colar 明确同意，在这条 git 命令前紧贴写 ALLOW_NO_VERIFY=1（只对紧跟的这一条生效）" ;;
             force)
-              suggest="命中 ${git_label}：强推会覆盖远端已有的提交。规则是一分支一个写入方、开发分支只用 git merge origin/main 整合、推送永远快进——推送被拒说明远端有你没有的提交（单写入方已被破坏），该停下报告，不是加 --force。删远端分支用 git push origin --delete <分支>（不拦）。确需强推且 Colar 明确同意，在这条 git 命令前紧贴写 ALLOW_GIT_FORCE=1（只对紧跟的这一条生效）" ;;
+              suggest="命中 ${git_label}：强推会覆盖远端已有的提交（--mirror 还会删掉远端有、本地没有的分支和标签）。规则是一分支一个写入方、开发分支只用 git merge origin/main 整合、推送永远快进——推送被拒说明远端有你没有的提交（单写入方已被破坏），该停下报告，不是加 --force。删远端分支用 git push origin --delete <分支>（不拦）。确需强推且 Colar 明确同意，在这条 git 命令前紧贴写 ALLOW_GIT_FORCE=1（只对紧跟的这一条生效）" ;;
           esac
         fi
       fi ;;
