@@ -11,7 +11,7 @@ source: migrated from colar-agents/CLAUDE.md (2026-08-04 /doctor check 4 — 常
 
 **不触发**：改 frontmatter（routing metadata：`description` / `route-to-me-when` / `tools`）不触发 gate——eval 只测 output 行为，不测路由。
 
-调用点：Tier 2 流程 ⑦ `/review` 之后、Tier 3 流程 ⑥ build/test 之时，若本次改了已覆盖 agent 的 prompt body。
+调用点：Tier 2/3 流程 build/test 之后、`/code-review` 前后（见 `colar-agents/CLAUDE.md` § 任务规模速记），若本次改了已覆盖 agent 的 prompt body。
 
 ## 触发与动作
 

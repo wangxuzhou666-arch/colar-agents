@@ -5,6 +5,77 @@ rates but stores nothing, so without this file "compare before/after" relies on
 remembering a number from a previous session. Update it whenever a run changes
 the expected result **and you have decided the new result is correct**.
 
+## 2026-10-01 — orchestration_audit.py cost ruler recalibrated
+
+The 09-19 fixes repaired *which records* get counted; this round repairs *what
+each record costs* and *how many times it is counted*. Four fixes:
+
+1. **Prices were per family, and stale.** `~/Desktop/cc-usage-bar/config.json`
+   priced every `opus*` at $15/$75 (Opus 5.5 is $4/$20) and every `fable*` at
+   $3/$15 (Fable 5.1 is $10/$50). It now has per-version keys (`opus-5-5`,
+   `opus-5`, `fable-5-1`, …) matched by longest substring, and the family keys
+   carry current-generation prices. Source: claude-api skill (price table cached
+   2026-06-24), checked 2026-10-01. The cc-usage-bar menu bar reads only the
+   family keys and the single `cacheWrite` price, so its nominal $ moved too, and
+   it still prices 1h cache writes at the 5m rate.
+2. **Cache writes were billed at a single rate.** Now split by
+   `usage.cache_creation.ephemeral_5m_input_tokens` (1.25× input) /
+   `ephemeral_1h_input_tokens` (2× input). Observed: 100% of main-loop writes
+   are 1h TTL, and 100% of subagent writes are 5m.
+3. **Every streamed reply was billed several times.** Claude Code writes one
+   jsonl record per content block of an assistant reply (thinking / text / each
+   `tool_use`). Every record carries the usage snapshot at that point: the
+   prompt side is identical across records, and `output_tokens` grows. The old
+   script billed every record. Fix: dedupe by `message.id`, taking usage from
+   the latest record and the union of `tool_use` blocks across the group.
+   Keeping only the last record would silently drop parallel tool calls: 5,863
+   `tool_use` blocks over 7 days, which halved the main-loop edit count. That
+   was caught in review before landing.
+4. **Session peak mixed layers.** Subagent records share the parent session's
+   `sessionId` (55/55 observed), so a session's "peak" was often a subagent's
+   context, and the >300K cost share was weighted by subagent spend. Peak and
+   call count are now main-loop only, and the bucket share is main-loop cost
+   over main-loop total, because the threshold asks "is the main loop's context
+   too long to keep dragging".
+
+New outputs: a token-class split (uncached / cache read / cache write 5m /
+cache write 1h / output) per layer, and a main-loop cache-break count bucketed
+by idle gap since the previous main-loop call.
+
+### Old vs new reading, same on-disk transcripts (run 2026-10-01, back-to-back)
+
+"Old" is the pre-fix script pinned to the pre-fix price table.
+
+| Window | Metric | Old 口径 | New 口径 |
+|---|---|---|---|
+| 7 day | total cost, all layers | $27,962.23 | $4,141.17 (−85%) |
+| 7 day | main-loop cost share | 29.7% | 17.3% |
+| 7 day | Agent dispatch rate | 6.95% (390/5608) | 6.95% (390/5609) |
+| 7 day | main-loop edits | 703 | 703 |
+| 7 day | sessions >300K | 41 sessions, 94.3% of all cost (peak from any layer) | 35 sessions, 83.1% of main-loop cost (main-loop peak) |
+
+Total-cost delta by factor, from an earlier same-day run ($27,745 → $4,119):
+① pricing −$20,136, ② TTL split +$309, ③ dedupe −$3,799. ④ does not change
+the total.
+
+### What the new ruler shows (7 day, same run)
+
+- **Most of the spend is in subagents (82.7%).** Subagent cache reads $2,074.61
+  (50.1% of all spend) and subagent 5m cache writes $803.99 (19.4%) are the two
+  largest lines. The main loop totals about $717.
+- **Main-loop cache breaks** are rare and are TTL expiry, not an unstable
+  prefix: 96 breaks plus 64 cold starts, costing $160.50 + $21.39 in writes.
+  94 of the 96 breaks came after more than 60 minutes idle (1h TTL expired),
+  2 came within 5 minutes, and none in 5–60 minutes.
+
+### 2026-09-19 baseline is retired
+
+The 09-19 table below (main loop 79.5%, >300K 92.5%, total $14,186.40, dispatch
+0.49%) was read with the pre-fix ruler, and is also quoted in `soul/SOUL.md`
+(`§ 主 loop 只做薄编排`). It is not comparable to anything produced from here
+on. With Colar's sign-off on 2026-10-01, SOUL no longer carries any measured
+figures. It points at this file and at a fresh `orchestration_audit.py` run.
+
 ## 2026-09-19 — orchestration_audit.py accounting fixes + baseline rebase
 
 `scripts/orchestration_audit.py` had three accounting bugs, found while trying
@@ -242,3 +313,53 @@ A drop below the baseline, or a degradation probe flipping, means the edit hurt
 the agent — revert or fix. Probes are flaky on a single run: confirm with
 majority-of-3 (`--case <probe-id>` ×3) before acting. Raise a number here only
 after deciding the improvement is real; lower one only alongside the reason.
+
+## SOUL Tool-Call Discipline 历史读数（2026-10-17 从 SOUL 迁出）
+
+SOUL 定位是 axioms-only（"6 个月后会错的不进 SOUL"），审计读数会过期，所以从 SOUL 剥出、原样存档于此。
+SOUL 只留规则 + 度量脚本指针。下列数字、日期、口径均照搬 SOUL 原文，未重新测量；"SOUL 原文未标日期"
+即原文就没写。SOUL 侧删除以 Colar 审核草案后实际落地为准。
+
+### InputValidationError 主诊断（2026-08-05，近 17 天 / 2516 session 实测）
+
+- 79 次 InputValidationError 里 75 次（95%）是 payload 根本没被解析成 JSON，只有 4 次是字段名/类型错。
+- 推论：「猜错参数名」是少数派失败（"Deferred 工具先 ToolSearch" 治的是那 5%），高频杀手是大而复杂的
+  payload 在序列化环节就崩——纪律重点是把 payload 拆小拆简单（"payload 拆小" 覆盖 95% 失败）。
+- 同日复核推翻了旧的「>1.5KB 才危险」说法：失败中位数约 1KB，67% 在 1.5KB 以下 → 没有安全字节数阈值。
+
+### 机械坑重踩率（2026-09-13 改写）
+
+- 从织锦 379 份 handoff 落盘提取 1928 条坑做跨时间聚类：周重踩率 5–18%、两个月零下降趋势。
+- 重踩最狠的几条当时就写在 SOUL 本节（「路径一律用绝对路径」）和 fabric-loop Pitfalls 里，照踩不误；
+  其中一条 handoff 自供「fabric-loop 早写过，又踩」。→ 判据「机械的走 hook、判断的留文本」由此而来。
+- 度量：`python3 ~/Desktop/colar-agents/scripts/handoff_repeat_rate.py <repo>`；baseline 8.2%（2026-09-13，hook 上线前）。
+
+### 单项工具错误计数（SOUL 原文未标日期，标注为"审计"）
+
+- 文件不存在错 32 次，多为相对路径（典型：cwd 已在某个项目子目录、却按另一处的相对路径去找）。
+- edit-before-read 63 次，最高频自伤（之后由 `edit_read_guard` hook exit 2 拦截）。
+
+### Context 阈值
+
+- `explore_read_nudge` 的 context 硬上限 400K：大模型 smart zone 的界限，过线推理质量下降；Colar 2026-10-11 由 500K 下调。
+- 低 context 阈值（200K）刻意不设：session 起手基线就 55-70K、调研读三个大文件即 190K，那时催 handoff 是纯亏。
+- `subagent_resume_guard`（≥400K 硬拦 SendMessage 续派）的起因：规则早在 memory 里，2026-10-11 仍把约 75 万 token 的 agent 续派了整批新活。
+
+### 薄编排（thin orchestrator）
+
+- session 起手基线 55-70K。
+- 编排实测读数（派发率 / 主 loop 成本占比 / >300K session 占比）的口径已改过两轮、数字两周内过期两次 → 一律以
+  `python3 ~/Desktop/colar-agents/scripts/orchestration_audit.py <天数>` 现跑为准（历次口径见本文件上方各节）。
+- `feedback_fable_thin_orchestrator_model_routing.md` 2026-07-03 就写下三条铁律，但 SOUL 一直无 pointer → 两个半月零执行，
+  是「规则触达不到执行点」的标本。
+
+### SOUL 其他段落剥出的日期 / 计数（同一轮清理）
+
+- Personality「问句 ≠ 施工令」：2026-07 审计，问句被当施工许可是 interrupt 的最大根因。
+- Output Handling 部署状态档位：2026-07 审计，72h 内翻车 3 次。
+- Output Handling「人工判断走 Artifact + 选择题」：2026-08-31 拍板。
+- Boundaries `feedback_privacy_defaults.md`：2026-07-06 三合一（数据/会话/创业 idea 三簇）。
+- Math「chat 里禁 LaTeX 源码」：2026-04 oral exam 复习时已警告过一次，2026-04-26 又踩雷一次。
+- Strategic Frameworks 锚定页：织锦 2026-08-31 的三次实证（完整版在 `feedback_anchor_backbone_page.md`）。
+- Sync Discipline：「5 月 cleanup 那种 5 文件 SOUL 完全重复的腐烂」；4-类表权威归 `/save-memory` 为 2026-08-05 拍板；
+  `memory_drift_check.sh` 2026-07-06 重写为单次 python 扫描，<0.2s，Stop hook 内真正跑得完。

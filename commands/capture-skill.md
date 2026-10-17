@@ -83,7 +83,13 @@ argument-hint: "[一句话描述要 capture 的 procedure，可选 / --dry 只�
 
 - 路径：`~/Desktop/colar-agents/integrations/hermes/skills/<slug>/SKILL.md`（version-controlled，与现有 skill 一致，见 SKILLS.md 索引）
 - **新建前 guard**：`test -d <slug>` —— 目录已存在但 2b 判成了「正交」= dedup 漏判，停下回 Step 2 重判，**绝不覆盖**
-- **正交（新建）**：建目录 + 写 SKILL.md
+- **正交（新建）**：建目录 + 写 SKILL.md + **接线**（机械步骤，必做）：
+  ```bash
+  [ -e ~/.claude/skills/<slug> ] || [ -L ~/.claude/skills/<slug> ] || \
+    ln -sn ~/Desktop/colar-agents/integrations/hermes/skills/<slug> ~/.claude/skills/<slug>
+  ```
+  必须带 `-n` + 存在性 guard：链接已存在时，BSD `ln -s` 会顺着旧链接进到仓内 skill 目录里，再建一个自指链接 `<slug>/<slug>`，而且不报错。已存在就别重建，直接看下一句的校验。
+  Claude Code 不从 `integrations/hermes/skills/` 发现 skill——不接线 = skill 不出现在可调用列表，且加载失败不报错（静默降级）。接完 `ls -la ~/.claude/skills/<slug>` 确认 symlink 指向正确。升级 / 细化改的是已接线的旧 skill，无需再接。
 - **升级**（Colar 已 y）：Edit 已有 SKILL.md + `version` bump（`1.1.0` 细节增强 / `2.0.0` procedure 替换）
 - **细化**：Edit 已有 SKILL.md 加子节 / pointer
 - **重复**：不写盘，直接到 Step 6
@@ -113,6 +119,7 @@ argument-hint: "[一句话描述要 capture 的 procedure，可选 / --dry 只�
 ```
 ✅ Captured: <slug> (<新建 / 升级 vN / 细化 / 重复跳过>)
   SKILL.md:    integrations/hermes/skills/<slug>/SKILL.md
+  接线:         ~/.claude/skills/<slug> → symlink ✓ (或 已有 / 不适用)
   SKILLS 索引:  +1 行 (或 不变)
   SOUL pointer: ⏸ 等你确认 (或 无需)
   → 记得 /ship 把 colar-agents 这次改动 commit/push（skill 是 version-controlled）

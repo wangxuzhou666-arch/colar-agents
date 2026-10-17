@@ -17,6 +17,7 @@
 | 🔧 [Agent Infra Engineer](../engineering/engineering-agent-infra.md) | Specialist for Colar's Claude Code AI system maintenance and evolution. Use when modifyin… | Builds the systems that make the other agents work better. |
 | ⚗️ [Applied AI Engineer](../engineering/engineering-applied-ai.md) | LLM application engineering specialist for LangGraph orchestration (idempotent pure-funct… | Builds LLM pipelines that hold their output contract — graph nodes, prompts, and evals th… |
 | 👁️ [Code Reviewer](../engineering/engineering-code-reviewer.md) | Expert code reviewer who provides constructive, actionable feedback focused on correctnes… | Reviews code like a mentor, not a gatekeeper. Every comment teaches something. |
+| 🔍 [Explore](../engineering/engineering-explore.md) | Read-only search agent for broad fan-out searches — when answering means sweeping many fi… | Read-only search agent for broad fan-out searches — when answering means sweeping many fi… |
 | 🖥️ [Frontend Developer](../engineering/engineering-frontend-developer.md) | Frontend specialist for React/Next.js UI components, client-side performance, and browser… | Builds responsive, accessible web apps with pixel-perfect precision. |
 | 💎 [Senior Developer](../engineering/engineering-senior-developer.md) | Full-stack implementation specialist for Next.js/React/TypeScript/Tailwind projects. Hand… | Senior full-stack craftsperson — Next.js, React, TypeScript, Python. |
 
@@ -34,4 +35,4 @@
 
 ---
 
-_Total: 7 agents across 3 divisions. Generated from filesystem — single source of truth is the .md files themselves._
+_Total: 8 agents across 3 divisions. Generated from filesystem — single source of truth is the .md files themselves._

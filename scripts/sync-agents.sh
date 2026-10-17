@@ -20,7 +20,7 @@ CONFIG="$PROJECT/.claude/agent-config.yaml"
 # Dual policy:
 #   user-level (~/.claude/agents) → symlink (live: editing master reflects instantly)
 #   project-level                 → cp     (snapshot: project pins a version, master edits don't leak in)
-# See colar-agents/CLAUDE.md "Agent 自动发现". Override with SYNC_MODE=link|copy if ever needed.
+# See colar-agents/CLAUDE.md "Agent 配置纪律". Override with SYNC_MODE=link|copy if ever needed.
 if [[ "${SYNC_MODE:-}" == "link" ]]; then
   LINK_MODE=1
 elif [[ "${SYNC_MODE:-}" == "copy" ]]; then

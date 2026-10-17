@@ -213,7 +213,7 @@ const GENERIC_PANEL = [
   // 2026-08-05：本盘四席全面去 agentType 化，只留一个确定存在的内置 agent。起因是三个死名——
   // Software Architect / Security Engineer（2026-08-04 退役）+ Trend Researcher（master 库有
   // product/product-trend-researcher.md，但从未部署到 ~/.claude/agents/、也未 sync 进任何 project
-  // ⟹ 库存 ≠ 可调用，正是 CLAUDE.md 路由协议警告的 INDEX.md 陷阱）。
+  // ⟹ 库存 ≠ 可调用，即「拿 agents/INDEX.md 库存目录当运行时菜单」的陷阱）。
   // 2026-08-08 更正前注：非法 agentType **不会**让 agent() 直接崩 —— pipeline 用 allSettled，
   // 单个 slot 抛错只变成 null 被下方 filter(Boolean) 吃掉，是**静默降级**：盘悄悄少一席、
   // castMode 仍显示 explicit，比崩更难发现。这也是下方 validateExperts 存在的理由。

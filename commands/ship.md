@@ -101,7 +101,7 @@ bash ~/Desktop/colar-agents/scripts/secret-gate.sh "$ROOT"
 
 **失败 → 停，贴真实报错，不 commit、不粉饰。** 修完后重敲 `/ship` 即可（Step 0-3 幂等可安全重跑，commit 之前无 git 副作用）。
 
-## Step 4 — /review（Tier 1 跳过）
+## Step 4 — /code-review（Tier 1 跳过）
 
 `/code-review` 扫 diff：correctness + 安全 + 逻辑。命中 high-confidence → 列出 + 问"先修再 commit 吗"；**修完 loop 回 Step 3 重 build**，不带未验证改动直接 commit。仅 info 级 → 一行提示继续。
 
