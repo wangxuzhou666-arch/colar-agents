@@ -4,8 +4,9 @@
 # 跑法：bash scripts/hooks/tests/test_bash_pitfall_guard.sh
 # 变异验证：GUARD=<改坏一条规则的副本> bash 本脚本 → 该规则的正例必须转红，否则用例没有判别力。
 #
-# 规则 6 / 7 / 8 的判定器（zsh_wordsplit_check.py / zsh_modifier_check.py / docker_prune_check.py）
-# 按 guard 自身所在目录查找，所以变异时要把 guard 副本和三个 .py 一起拷进同一个临时目录，再改其中一个。
+# 规则 6 / 7 / 8 / 9 的判定器（zsh_wordsplit_check.py / zsh_modifier_check.py / docker_prune_check.py /
+# git_safety_check.py，后两个共用 shell_segments.py）按 guard 自身所在目录查找，所以变异时要把 guard 副本和
+# 这五个 .py 一起拷进同一个临时目录，再改其中一个。
 #
 # 每条规则至少 2 正 2 反，反例优先覆盖规则本身明写的放行例外（venv 绝对路径、cd 锚定、引号等），
 # 因为那些例外才是最容易被后来人"顺手收紧"改坏的部分。
@@ -186,6 +187,54 @@ expect_allow "R8 commit message 里提到"        "git commit -m \"docs: never r
 expect_allow "R8 注释里"                       "docker image ls # 别跑 docker system prune -af"
 expect_allow "R8 heredoc 正文里"               $'cat > /Users/colar/x/RUNBOOK.md <<\'EOF\'\n不要运行 docker image prune -a\ndocker rmi abc\nEOF\necho done'
 expect_allow "R8 docker run -a stdout 不是 prune" "docker run --rm -a stdout alpine echo hi"
+
+# ---- 规则 9：跳过仓库钩子（--no-verify）/ 强推 ----
+# 正例钉「命中 <标签>」：同时验证判定器认出的是哪一类、哪个旗标，不只是"被拦了"。
+expect_deny  "R9 commit --no-verify"           "git commit --no-verify -m wip"                      "命中 git commit --no-verify"
+expect_deny  "R9 commit -n"                    "git commit -n -m wip"                               "命中 git commit -n"
+expect_deny  "R9 commit -anm 合写"             "git commit -anm wip"                                "命中 git commit -n"
+expect_deny  "R9 -C 目录 + && 之后"            "git add -A && git -C /Users/colar/x commit --no-verify -m x" "命中 git commit --no-verify"
+expect_deny  "R9 merge --no-verify"            "git merge --no-verify origin/main"                  "命中 git merge --no-verify"
+expect_deny  "R9 push --no-verify"             "git push --no-verify origin feat/x"                 "命中 git push --no-verify"
+expect_deny  "R9 push --force"                 "git push --force origin feat/x"                     "命中 git push --force"
+expect_deny  "R9 push -f"                      "git push -f origin feat/x"                          "命中 git push -f"
+expect_deny  "R9 push -uf 合写"                "git push -uf origin feat/x"                         "命中 git push -f"
+expect_deny  "R9 --force-with-lease"           "git push --force-with-lease origin feat/x"          "命中 git push --force-with-lease"
+expect_deny  "R9 --force-with-lease=ref:sha"   "git push --force-with-lease=feat/x:abc123 origin feat/x" "命中 git push --force-with-lease"
+expect_deny  "R9 --force-if-includes"          "git push --force-if-includes origin feat/x"         "命中 git push --force-if-includes"
+expect_deny  "R9 +refspec"                     "git push origin +feat/x"                            "命中 git push +feat/x"
+expect_deny  "R9 引号里的 +refspec 照样是 refspec" "git push origin \"+HEAD:refs/heads/feat/x\""   "命中 git push +HEAD:refs/heads/feat/x"
+expect_deny  "R9 旗标写在位置参数之后"         "cd /Users/colar/x && git push origin HEAD --force"  "命中 git push --force"
+expect_deny  "R9 -c k=v 全局选项之后"          "git -c core.editor=true push -f origin x"           "命中 git push -f"
+expect_deny  "R9 bash -c 包裹"                 "bash -c 'git push -f origin x'"                     "命中 git push -f"
+expect_deny  "R9 for 循环里"                   "for b in a b; do git push -f origin \$b; done"      "命中 git push -f"
+expect_deny  "R9 放行前缀只管紧跟的那一条"     "ALLOW_GIT_FORCE=1 git push -f origin x && git push -f origin y" "命中 git push -f"
+expect_deny  "R9 export 不是放行（非全局开关）" "export ALLOW_GIT_FORCE=1; git push -f origin x"    "命中 git push -f"
+expect_deny  "R9 放行值必须是 1"               "ALLOW_GIT_FORCE=0 git push -f origin x"             "命中 git push -f"
+expect_deny  "R9 强推的前缀不放行跳钩子"       "ALLOW_GIT_FORCE=1 git push --no-verify origin x"    "命中 git push --no-verify"
+expect_deny  "R9 跳钩子的前缀不放行强推"       "ALLOW_NO_VERIFY=1 git push --no-verify --force origin x" "命中 git push --force"
+expect_allow "R9 ALLOW_GIT_FORCE=1 放行强推"   "ALLOW_GIT_FORCE=1 git push --force-with-lease origin x"
+expect_allow "R9 ALLOW_NO_VERIFY=1 放行跳钩子" "ALLOW_NO_VERIFY=1 git commit --no-verify -m x"
+expect_allow "R9 放行前缀在 sudo 之后的赋值"   "sudo ALLOW_GIT_FORCE=1 git push -f origin x"
+expect_allow "R9 push -n 是 --dry-run"         "git push -n origin feat/x"
+expect_allow "R9 --dry-run 演习不拦"           "git push --dry-run --force origin feat/x"
+expect_allow "R9 --delete 删远端分支"          "git push origin --delete feat/x"
+expect_allow "R9 -d 删远端分支"                "git push origin -d feat/x"
+expect_allow "R9 :分支 删远端分支"             "git push origin :feat/x"
+expect_allow "R9 普通推送 -u"                  "git push -u origin feat/x"
+expect_allow "R9 -o 的值不是旗标"              "git push -o ci.skip origin feat/x"
+expect_allow "R9 --no-force-with-lease 是取消" "git push --no-force-with-lease origin feat/x"
+expect_allow "R9 commit -mn：n 是 message"     "git commit -mn"
+expect_allow "R9 commit -uno：no 是 -u 的值"   "git commit -uno -m x"
+expect_allow "R9 commit --verify"              "git commit --verify -m x"
+expect_allow "R9 commit message 里提到"        "git commit -m \"docs: never use --no-verify or git push --force\""
+expect_allow "R9 merge -n 是 --no-stat"        "git merge -n origin/main"
+expect_allow "R9 git stash push 不是 push"     "git stash push -m wip"
+expect_allow "R9 fetch --force 不碰远端"       "git fetch --force origin"
+expect_allow "R9 grep 参数里的字样"            "grep -rn \"git push --force\" /Users/colar/x/docs"
+expect_allow "R9 echo 未加引号也只是参数"      "echo git push --force"
+expect_allow "R9 heredoc 正文里"               $'cat > /Users/colar/x/AGENTS.md <<\'EOF\'\n禁止 git push --force 与 git commit --no-verify\nEOF\necho done'
+expect_allow "R9 --help"                       "git push --force --help"
 
 echo "PASS $pass / FAIL $fail"
 [ "$fail" -eq 0 ]

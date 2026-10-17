@@ -15,7 +15,7 @@
 #
 # 自证测试：bash scripts/hooks/tests/test_bash_pitfall_guard.sh —— 每条规则都有正例（必 deny）
 # 与反例（必放行，含各规则明写的放行例外）。改任何规则先跑它；新规则不带正反用例不许进。
-# 已知限制：heredoc 正文也在被扫的命令串里（规则 8 除外，它的判定器会跳过 heredoc 正文），
+# 已知限制：heredoc 正文也在被扫的命令串里（规则 8 / 9 除外，它们的判定器会跳过 heredoc 正文），
 #           往文件里写含这些形状的内容请用 Write/Edit 工具。
 
 input=$(cat 2>/dev/null || true)
@@ -132,6 +132,34 @@ if [ -z "$suggest" ]; then
         docker_hit=$(printf '%s' "$cmd" | python3 "$docker_checker" 2>/dev/null | head -n 1 || true)
         if [ -n "$docker_hit" ]; then
           suggest="命中 ${docker_hit}：会删镜像或 build cache，不是无风险清理。本机有钉死 digest、不推 registry、无法按字节复原的本地镜像（例如织锦 PPTAgent 线 colar/pptagent-lab；2026-10-07 一次磁盘清理跑 image prune -a + builder prune -a，删掉 B3 钉死的 v1d-f60543fb… 等镜像，零恢复来源）。先跑 docker image ls --digests 看清会删什么。更安全的替代：不带 -a 的 docker image prune（只删 dangling）；docker builder prune --reserved-space <大小>（不带 -a，保留一部分 cache；旧版 CLI 叫 --keep-storage）；确需 -a 时用 --filter（until= / label!=）排除要保留的。看清后若 Colar 明确要删，在这条 docker 命令前紧贴写 ALLOW_DOCKER_PRUNE=1（只对紧跟的这一条生效）"
+        fi
+      fi ;;
+  esac
+fi
+
+# ---- 规则 9：跳过仓库钩子（--no-verify）/ 强推 ----
+# 2026-10-17 织锦 git 协作规范：多个助理（本机 / 云端 Claude、Codex）共用一个仓，规则的机械层就是仓库钩子
+# （pre-commit / pre-merge-commit / pre-push），--no-verify 一个词让它们全部失效且不留痕；开发分支一律
+# merge origin/main 后快进推送，强推会覆盖别人已推的提交。准入判据的例外同规则 8：后果不可逆 / 绕过无痕，
+# 踩一次就够，不等重踩证据（随 2026-10-17 织锦 git 协作规范计划一并拍板纳入）。
+# 拦：git commit --no-verify / -n、git merge --no-verify、git push --no-verify；git push --force / -f /
+#     --force-with-lease / --force-if-includes / +refspec。不拦：git push -n（--dry-run）、--delete / :分支 删除。
+# 放行：紧贴该条 git 命令写前缀 ALLOW_NO_VERIFY=1 / ALLOW_GIT_FORCE=1，各管各的、只对紧跟的那一条生效。
+# 判定在同目录 git_safety_check.py（与规则 8 共用 shell_segments.py 切词）；判定器缺失或异常一律放行。
+if [ -z "$suggest" ]; then
+  case "$cmd" in
+    *git*commit*|*git*merge*|*git*push*)
+      git_checker="$(dirname "${BASH_SOURCE[0]}")/git_safety_check.py"
+      if [ -f "$git_checker" ]; then
+        git_hit=$(printf '%s' "$cmd" | python3 "$git_checker" 2>/dev/null | head -n 1 || true)
+        if [ -n "$git_hit" ]; then
+          read -r git_kind git_label <<< "$git_hit"
+          case "$git_kind" in
+            no-verify)
+              suggest="命中 ${git_label}：会跳过仓库钩子——secret 门 / main 分支拦截 / 推送规则全部失效，且不留痕。钩子拦下就按它的提示修；仓库给了单项登记口的走登记口（织锦：GATE_SKIP_REASON=\"<kind>: <原因>\"，记进 .gate-skips.jsonl）。确需整体绕过且 Colar 明确同意，在这条 git 命令前紧贴写 ALLOW_NO_VERIFY=1（只对紧跟的这一条生效）" ;;
+            force)
+              suggest="命中 ${git_label}：强推会覆盖远端已有的提交。规则是一分支一个写入方、开发分支只用 git merge origin/main 整合、推送永远快进——推送被拒说明远端有你没有的提交（单写入方已被破坏），该停下报告，不是加 --force。删远端分支用 git push origin --delete <分支>（不拦）。确需强推且 Colar 明确同意，在这条 git 命令前紧贴写 ALLOW_GIT_FORCE=1（只对紧跟的这一条生效）" ;;
+          esac
         fi
       fi ;;
   esac
