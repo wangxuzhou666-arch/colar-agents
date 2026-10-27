@@ -1,0 +1,30 @@
+#!/bin/sh
+
+# ratchet:begin
+# Installed by `ratchet init`; portable (no machine-specific paths), so it is safe to commit. Delete this block to uninstall.
+# The tool is $RATCHET_BIN, else `bin` in .ratchet.json (relative to the repo root), else `ratchet` on PATH.
+# Python is $RATCHET_PY, else python3 on PATH; it must be 3.10 or newer.
+if [ -n "${RATCHET_HOOK_PROBE:-}" ]; then
+  echo "ratchet-hook-probe post-commit"
+  exit 0
+fi
+# core.hooksPath can point many repos at one hooks directory; only repos with a config use ratchet.
+if [ -f .ratchet.json ]; then
+  RATCHET_PY="${RATCHET_PY:-python3}"
+  if "$RATCHET_PY" -c 'import sys; sys.exit(sys.version_info < (3, 10))' 2>/dev/null; then
+    if [ -z "${RATCHET_BIN:-}" ]; then
+      RATCHET_BIN=$("$RATCHET_PY" -c 'import json; print(json.load(open(".ratchet.json")).get("bin", ""))' 2>/dev/null || true)
+      if [ -z "$RATCHET_BIN" ]; then
+        RATCHET_BIN=$(command -v ratchet || true)
+      fi
+    fi
+    if [ -f "$RATCHET_BIN" ]; then
+      "$RATCHET_PY" "$RATCHET_BIN" infer --quiet || true
+    else
+      printf '%s\n' "ratchet: WARNING: cannot find the ratchet executable (set RATCHET_BIN, add \"bin\" to .ratchet.json, or put ratchet on PATH); post-commit is NOT running." >&2
+    fi
+  else
+    printf '%s\n' "ratchet: WARNING: $RATCHET_PY is missing or older than Python 3.10 (set RATCHET_PY to a 3.10+ interpreter); post-commit is NOT running." >&2
+  fi
+fi
+# ratchet:end

@@ -1,0 +1,8 @@
+{
+  "rules_files": ["CODING-STYLE.md"],
+  "digest": "CODING-STYLE.digest.md",
+  "inject_targets": [
+    "engineering/engineering-code-reviewer.md",
+    "engineering/engineering-senior-developer.md"
+  ]
+}

@@ -105,6 +105,7 @@ colar-agents/
 ```bash
 # 1. clone master library
 git clone https://github.com/wangxuzhou666-arch/colar-agents.git ~/Desktop/colar-agents
+git -C ~/Desktop/colar-agents config core.hooksPath .githooks   # 启用版本化的 git hooks（每个 clone 一次）
 
 # 2. 同步全局通用 agent 到 ~/.claude/agents/
 bash ~/Desktop/colar-agents/scripts/sync-all.sh

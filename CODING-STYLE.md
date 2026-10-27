@@ -44,7 +44,7 @@
 **机制**：`return None` / `or default` / 永远走不到的 `else` 把"出事了"改写成"看起来正常"。这是宽 catch 的另一半——一个负责丢信息，一个负责伪装。
 
 规则：
-1. **[P0F.1]** 默认 **fail fast**：程序员错误用 `assert`，坏输入在**边界**（HTTP handler / 配置解析 / 外部数据入口）用 `raise ValueError/TypeError`。内部 helper 假设输入合法，**不重复校验**。
+1. **[P0F.1]** 默认 **fail fast**：程序员错误用 `assert`，坏输入在**边界**（HTTP handler / 配置解析 / 外部数据入口）用 `raise ValueError/TypeError`。内部 helper 假设输入合法，**不重复校验**。 <!-- digest: 默认 fail fast：程序员错误用 `assert`，坏输入在边界 `raise ValueError/TypeError`；内部 helper 不重复校验 -->
 2. **[P0F.2]** 合法降级（上面四类）必须**显式**：有 log、有明确的降级值语义（`token_count = 0  # usage 缺失，探针结论不依赖它`），不是静默 `None`。
 3. **[P0F.3]** **不 over-protect**：一个操作 99% 正确，就不要为那 1% 加防御分支。LLM 的本能是加，抵抗它。
 4. **[P0F.4]** 判空只在值**真的可能为空**时写。类型标注说了 `str` 就不要 `if s is not None`。
@@ -69,7 +69,7 @@
 1. **[P2.1]** 基类 / Protocol / Factory 出现时必须有 **≥2 个真实实现**；否则写具体类，等第二个来了再抽。
 2. **[P2.2]** "以后可能扩展"不是理由；**第三次重复**才是抽的时机。
 3. **[P2.3]** 一次性需求不造 config 层 / 插件机制 / 注册表。
-4. **[P2.4]** 泛名黑名单：`data / result / info / tmp / manager / handler / util` 不带限定词不许用（要 `token_ids` / `decode_result` / `order_handler`）。
+4. **[P2.4]** 泛名黑名单：`data / result / info / tmp / manager / handler / util` 不带限定词不许用（要 `token_ids` / `decode_result` / `order_handler`）。 <!-- digest: 泛名黑名单：`data/result/info/tmp/manager/handler/util` 不带限定词不许用（要 `decode_result`） -->
 5. **[P2.5]** 对称对不混用：`start/stop` `begin/end` `open/close` `send/recv`（不出现 `start/finish`）。
    **bool 命名走判断档（reviewer），不再机械拦**（2026-10-06 由「bool 必须带 `is_ / has_ / should_ / can_` 前缀」降级）：一个 bool 的名字**读起来像非 bool 的名词 / 动词**（`timeout` / `write` / `real` / `conflict`——读者会当成数值 / 对象 / 动作）必须改（`should_timeout` / `is_write_mode` / `is_real` / `has_conflict`）；读来无歧义的过去分词 / 形容词 / 惯用旗标（`truncated` / `include_derived` / `*_ok` / `dry_run / verbose / debug / force / strict / quiet`）不需要前缀，**别为凑前缀报 finding**。
    **`use_` 仍机械拦**：`use_` 只给 React hooks，Python 里不出现（`: bool` 注解 / bool 字面量默认值或赋值里的 `use_x`，由 pre-commit 风格门 USE_PREFIX 拦）。
@@ -90,8 +90,15 @@
 1. **[R.1]** **标准来自本文件，不来自你**。不得当场发明阈值；文件没写的，标"无既定标准，建议 X"而不是当违规报。
 2. **[R.2]** **Never rubber-stamp**：找不到问题时必须说明"为什么这段代码是好的"（哪条规则它做对了），禁止只回 LGTM。
 3. **[R.3]** **Teaching**：每条 finding 带 why（机制）+ 正确写法，不只报 what。
-4. **[R.4]** **分级对齐**：P0 → blocker，P1/P2 → should-fix，P3 → nice；与 fabric-loop Phase 4 三级一一对应。
-5. **[R.5]** **AI 代码探测清单**（命中即按对应 P 条报）：整块逻辑一个 try / 对不会 None 的东西判空 / 一个实现的基类 / 复述代码的 docstring / "以防万一"的 default / 不合本仓惯例的通用样板。
+4. **[R.4]** **分级对齐**：finding 的严重度由所违反条款的族决定，与 fabric-loop Phase 4 三级一一对应；族 → 严重度映射见下表。
+
+   | family | severity |
+   |---|---|
+   | P0E, P0F | blocker |
+   | P1, P2 | should-fix |
+   | P3 | nice |
+
+5. **[R.5]** **AI 代码探测清单**（命中即按对应 P 条报）：整块逻辑一个 try / 对不会 None 的东西判空 / 一个实现的基类 / 复述代码的 docstring / "以防万一"的 default / 不合本仓惯例的通用样板。 <!-- digest: AI 代码探测，命中按对应 P 条报：整块一个 try / 不会 None 也判空 / 单实现基类 / 复述型 docstring / 以防万一 default / 非本仓惯例样板 -->
 6. **[R.6]** **Context matters**：孤立看错的改动，放进系统不变量里可能是对的。先读周边再下判。
 7. **[R.7]** **新门 / 新规则必须变异自证，否则它只是装饰**（2026-09-16 升进铁律）。
    **机制**：一道门"跑了、绿了"什么都不证明——永远返回绿的门也绿。唯一能证明它有判别力的，

@@ -105,6 +105,7 @@ Primary path is Claude Code. For the other 10 supported IDEs (Cursor / Aider / W
 ```bash
 # 1. clone the master library
 git clone https://github.com/wangxuzhou666-arch/colar-agents.git ~/Desktop/colar-agents
+git -C ~/Desktop/colar-agents config core.hooksPath .githooks   # versioned git hooks (once per clone)
 
 # 2. sync global agents into ~/.claude/agents/
 bash ~/Desktop/colar-agents/scripts/sync-all.sh

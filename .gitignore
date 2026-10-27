@@ -119,3 +119,10 @@ integrations/qwen/agents/
 # per-session handoff 兜底落盘（chat 为主 + 落盘兜底，纯本地不进 git）
 .claude/handoffs/
 .local-verify/
+
+# ratchet:begin
+.style-findings.jsonl
+.ratchet-label-page.html
+.ratchet-label-batch.json
+.ratchet/reviews/
+# ratchet:end
