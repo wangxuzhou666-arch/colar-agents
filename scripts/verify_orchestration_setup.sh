@@ -2,7 +2,7 @@
 #
 # verify_orchestration_setup.sh
 #
-# 一键检查 2026-09-18 这批"编排纪律"配置是否全部到位（7 项，见下）。
+# 一键检查 2026-09-18 这批"编排纪律"配置是否全部到位（6 项，见下）。
 # 不依赖 cwd —— 全部路径写死成绝对路径。直接跑：
 #   bash /Users/colar/Desktop/colar-agents/scripts/verify_orchestration_setup.sh
 #
@@ -11,7 +11,7 @@
 #   ✗ <项目>: <具体哪里不对>   —— 失败，附体检时抓到的具体原因
 #
 # 全绿 exit 0；任何一项失败 exit 1。不用 set -e —— 单项检查失败不能让脚本
-# 提前退出，否则看不到全貌（7 项要一次跑完，逐项报告，而不是撞到第一个红灯就停）。
+# 提前退出，否则看不到全貌（6 项要一次跑完，逐项报告，而不是撞到第一个红灯就停）。
 
 set -uo pipefail
 
@@ -25,8 +25,6 @@ SENIOR_DEV_MD="$AGENTS_ROOT/engineering/engineering-senior-developer.md"
 AGENT_INFRA_MD="$AGENTS_ROOT/engineering/engineering-agent-infra.md"
 VC_CRITIC_MD="$AGENTS_ROOT/specialized/idea-vc-critic.md"
 RUN_EVAL_SH="$AGENTS_ROOT/eval/run-eval.sh"
-SOUL_MD="$AGENTS_ROOT/soul/SOUL.md"
-ORCH_AUDIT_PY="$AGENTS_ROOT/scripts/orchestration_audit.py"
 
 FAIL=0
 
@@ -211,26 +209,8 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 7) SOUL.md 含"主 loop 只做薄编排"这条规则，且 scripts/orchestration_audit.py 存在
-#    防的是：规则和审计脚本只落地一半——feedback_fable_thin_orchestrator_model_routing.md
-#    早在 2026-07-03 就写下这条铁律，但 SOUL 一直没接 pointer，两个半月零执行，
-#    是"规则写下但触达不到执行点"的先例。规则文字有了但没有脚本能审计是否遵守，
-#    或者反过来脚本有了但规则没写进 SOUL，都等于没做完。
+# 原第 7 项「SOUL 含『主 loop 只做薄编排』+ orchestration_audit.py 存在」已删（2026-11-03）：
+#   该规则已从 SOUL 撤除、对应 memory 也已删，只剩审计脚本存在这一半，不再构成"双落地"检查。
 # ---------------------------------------------------------------------------
-check7_msg=""
-if [[ ! -f "$SOUL_MD" ]]; then
-  check7_msg="$SOUL_MD 不存在"
-elif ! grep -qF -- '主 loop 只做薄编排' "$SOUL_MD"; then
-  check7_msg="$SOUL_MD 里没有找到「主 loop 只做薄编排」这句话"
-fi
-if [[ ! -f "$ORCH_AUDIT_PY" ]]; then
-  check7_msg="${check7_msg:+$check7_msg; }$ORCH_AUDIT_PY 不存在"
-fi
-
-if [[ -z "$check7_msg" ]]; then
-  ok 'SOUL.md 规则 + orchestration_audit.py 双落地'
-else
-  bad 'SOUL.md 规则 + orchestration_audit.py 双落地' "$check7_msg"
-fi
 
 exit "$FAIL"

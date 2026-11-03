@@ -139,8 +139,7 @@ elif reads > last:
     sample = ", ".join(paths[:4])
     print(f"[explore-nudge::hook-only] 主 loop 已连读 {reads} 个文件未改任何东西（{sample}…）—— "
           f"这是探索性工作，内容会永久留在主 loop context 并在之后每一轮重付。"
-          f"考虑把剩下的摸底派给 Explore/subagent，只要结论回来。"
-          f"（判据见 feedback_fable_thin_orchestrator_model_routing：主 loop 不读大文件）")
+          f"考虑把剩下的摸底派给 Explore/subagent，只要结论回来。")
     nudge_shown = True
 
 # --- 静默埋点（2026-09-19）---------------------------------------------

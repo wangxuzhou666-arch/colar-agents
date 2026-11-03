@@ -6,7 +6,7 @@
 
 - **Tier 1（单文件 / 单函数、机械改动）**：act → `/diff` → commit。
 - **Tier 2/3（跨文件 / 新系统 / 跨 session 重构）**：plan（架构级用 EnterPlanMode）→ 执行 → `/diff`（build 之前看，提前发现方向偏差）→ build / test → `/code-review` → `/ship` 收尾。
-- 主 loop 自己干还是派 agent、判断类何时停下来问（走 `AskUserQuestion` 弹窗），一律按 SOUL § Personality 与 § Tool-Call Discipline「薄编排」，本文件不另立规则。
+- 判断类何时停下来问（走 `AskUserQuestion` 弹窗），一律按 SOUL § Personality，本文件不另立规则。
 - 改了 agent prompt body → 必过下方 Agent Prompt-Edit Gate。
 - 界面 / 视觉类任务 → skill `ui-design-pipeline`（Design Bridge：Replication 复刻 74 品牌 / Genesis 原创）。
 
@@ -21,7 +21,6 @@
 - 增删 agent 后跑 `python3 ~/Desktop/colar-agents/scripts/gen-agent-index.py` 重生成 `agents/INDEX.md`（自动生成，勿手改）。2026-10-17 读数：master 8 个，全部已 symlink 部署到全局；以 `ls ~/.claude/agents/` 现查为准。运行时可调用集以系统注入的 available agent types 为准。
 - **项目层**：项目 `.claude/agent-config.yaml` 声明要哪些 agent，由 sync 脚本从 master 复制进该项目 `.claude/agents/`（见下方脚本速查）。不手动往项目 `.claude/agents/` 放文件。
 - **单项目破例**：知识 100% 绑定单一项目、对其他项目零复用价值的 agent，可手写进该项目 `.claude/agents/`（master 不留副本——sync 机制不支持这类物种，master 收了会在清理中被当死库存砍掉），并在该项目文档记录破例。现有两例都在织锦（`~/Desktop/创业/fabric-agent-demo`）：`fabric-architect` · `pattern-cad`，破例记录在织锦仓自己的文档里。裸 home lane 靠本仓的 pointer skill 桥接过去：`fabric-architect-pointer` · `pattern-cad-pointer` · `fabric-loop-pointer`。
-- 路由兜底（理想 agent 未部署 / 两个 agent 都像）：见 memory `feedback_agent_routing_fallback_ladder.md`。
 
 ## Skill 接线
 

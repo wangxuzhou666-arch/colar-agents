@@ -75,6 +75,8 @@ The 09-19 table below (main loop 79.5%, >300K 92.5%, total $14,186.40, dispatch
 (`§ 主 loop 只做薄编排`). It is not comparable to anything produced from here
 on. With Colar's sign-off on 2026-10-01, SOUL no longer carries any measured
 figures. It points at this file and at a fresh `orchestration_audit.py` run.
+As of 2026-11-03 the `§ 主 loop 只做薄编排` section itself has been removed
+from SOUL, so nothing there quotes these figures any more.
 
 ## 2026-09-19 — orchestration_audit.py accounting fixes + baseline rebase
 
@@ -152,6 +154,8 @@ that specific reading). Treat the table above as the current baseline for
 `soul/SOUL.md` embeds the old number as a fact, not an axiom — flagged for
 Colar to update or route through `/save-memory`, not edited here (SOUL edits
 need sign-off per this repo's own SOUL ↔ Memory Sync Discipline).
+**Resolved (2026-11-03):** that SOUL section has since been removed entirely,
+so there is no embedded number left to update.
 
 ## 2026-09-18 — judge model split + senior-developer moved to sonnet
 
