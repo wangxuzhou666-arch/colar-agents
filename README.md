@@ -2,7 +2,7 @@
 
 *English | [中文](README.zh.md)*
 
-A workflow framework I run my own Claude Code setup on. The underlying agent pool is forked from [msitarzewski/agency-agents](https://github.com/msitarzewski/agency-agents); everything on top of it — Tier 1/2/3 task routing, a 4-platform opportunity-mining pipeline, a two-layer SOUL/Memory persona system, a UI/UX design gate — grew out of keeping a personal AI assistant consistent across devices and multiple daily-driver projects.
+A workflow framework I run my own Claude Code setup on. The underlying agent pool is forked from [msitarzewski/agency-agents](https://github.com/msitarzewski/agency-agents); everything on top of it — Tier 1/2/3 task routing, a 4-platform opportunity-mining pipeline, a two-layer SOUL/Memory persona system — grew out of keeping a personal AI assistant consistent across devices and multiple daily-driver projects.
 
 Take whatever's useful; I may be slow on issues.
 
@@ -79,7 +79,6 @@ colar-agents/
 │   ├── convert.sh           ← multi-tool integration conversion
 │   └── install.sh           ← multi-tool integration install
 ├── engineering/             ← engineering agents
-├── design/                  ← UI/UX/brand
 ├── marketing/               ← multi-platform content ops
 ├── sales/                   ← B2B sales
 ├── paid-media/              ← paid acquisition
@@ -137,19 +136,13 @@ Trigger phrase: `max mode`. Evaluating a startup idea defaults to a 17-agent adv
 
 Gated behind a ≥1500-word brief or ≥4h of committed effort, so the process doesn't become ritual.
 
-### UI/UX Design Bridge (mandatory design gate)
-
-Every UI task passes through this agent first. It locks in a target design system (74 options: Linear / Stripe / Notion / Apple / Vercel / Spotify …) → fetches the matching DESIGN.md → outputs `instructions-{brand}.md`, which downstream consumers (a frontend-design skill and a Frontend Developer agent) build against.
-
-Never skipped — even "just change a button color" checks whether a design spec exists first.
-
 ---
 
 ## Acknowledgments
 
 The underlying agent pool prototype comes from [msitarzewski/agency-agents](https://github.com/msitarzewski/agency-agents); I kept its naming style (Whimsy Injector, Rapid Prototyper, Reality Checker) as-is — reusing good placeholders beat inventing 12 division names myself.
 
-What's actually been rebuilt is the layer on top: tier routing, three-tier discovery, SOUL/Memory, the design gate, Money Finder, Idea Maximum Mode — these workflows have little left in common with the original repo.
+What's actually been rebuilt is the layer on top: tier routing, three-tier discovery, SOUL/Memory, Money Finder, Idea Maximum Mode — these workflows have little left in common with the original repo.
 
 ---
 

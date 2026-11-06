@@ -6,7 +6,7 @@
 
 > 命名风格 (Whimsy Injector / Rapid Prototyper / Reality Checker 等) 沿用上游 [msitarzewski/agency-agents](https://github.com/msitarzewski/agency-agents)。
 
-跳转: [Engineering](#engineering) · [Design](#design) · [Specialized](#specialized)
+跳转: [Engineering](#engineering) · [Specialized](#specialized)
 
 ---
 
@@ -18,14 +18,8 @@
 | ⚗️ [Applied AI Engineer](../engineering/engineering-applied-ai.md) | LLM application engineering specialist for LangGraph orchestration (idempotent pure-funct… | Builds LLM pipelines that hold their output contract — graph nodes, prompts, and evals th… |
 | 👁️ [Code Reviewer](../engineering/engineering-code-reviewer.md) | Expert code reviewer who provides constructive, actionable feedback focused on correctnes… | Reviews code like a mentor, not a gatekeeper. Every comment teaches something. |
 | 🔍 [Explore](../engineering/engineering-explore.md) | Read-only search agent for broad fan-out searches — when answering means sweeping many fi… | Read-only search agent for broad fan-out searches — when answering means sweeping many fi… |
-| 🖥️ [Frontend Developer](../engineering/engineering-frontend-developer.md) | Frontend specialist for React/Next.js UI components, client-side performance, and browser… | Builds responsive, accessible web apps with pixel-perfect precision. |
+| 🖥️ [Frontend Developer](../engineering/engineering-frontend-developer.md) | Frontend specialist for React/Next.js component behavior, client-side performance, and br… | Builds responsive, accessible web apps with pixel-perfect precision. |
 | 💎 [Senior Developer](../engineering/engineering-senior-developer.md) | Full-stack implementation specialist for Next.js/React/TypeScript/Tailwind projects. Hand… | Senior full-stack craftsperson — Next.js, React, TypeScript, Python. |
-
-## Design
-
-| Agent | Specialty | When to Use |
-|-------|-----------|-------------|
-| \U0001F308 [Design Bridge](../design/design-bridge.md) | DESIGN.md translator with two modes — REPLICATION: fetches an existing brand's design sys… | Translates any brand's design DNA into pixel-perfect implementation specs. |
 
 ## Specialized
 
@@ -35,4 +29,4 @@
 
 ---
 
-_Total: 8 agents across 3 divisions. Generated from filesystem — single source of truth is the .md files themselves._
+_Total: 7 agents across 2 divisions. Generated from filesystem — single source of truth is the .md files themselves._

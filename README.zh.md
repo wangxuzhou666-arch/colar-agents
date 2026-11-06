@@ -2,7 +2,7 @@
 
 *[English](README.md) | 中文*
 
-我自己跑 Claude Code 的工作流框架。底层 agent 池 fork 自 [msitarzewski/agency-agents](https://github.com/msitarzewski/agency-agents)，上面这一层 —— Tier 1/2/3 任务分流、Money Finder 4 平台深挖、SOUL ↔ Memory 双层人格、UI/UX Design Bridge 门卫 —— 是我跨设备同步个人 AI 助手时长出来的，跨多个项目 daily driver。
+我自己跑 Claude Code 的工作流框架。底层 agent 池 fork 自 [msitarzewski/agency-agents](https://github.com/msitarzewski/agency-agents)，上面这一层 —— Tier 1/2/3 任务分流、Money Finder 4 平台深挖、SOUL ↔ Memory 双层人格 —— 是我跨设备同步个人 AI 助手时长出来的，跨多个项目 daily driver。
 
 朋友路过想抄哪段直接拿，issue 我可能不回。
 
@@ -79,7 +79,6 @@ colar-agents/
 │   ├── convert.sh           ← 多工具集成转换
 │   └── install.sh           ← 多工具集成安装
 ├── engineering/             ← 工程类 agent
-├── design/                  ← UI/UX/品牌
 ├── marketing/               ← 多平台内容运营
 ├── sales/                   ← B2B 销售
 ├── paid-media/              ← 付费投放
@@ -137,19 +136,13 @@ bash ~/Desktop/colar-agents/scripts/sync-agents.sh "$(pwd)"
 
 带闸门: ≥1500 字 brief 或 ≥4h 投入才允许启动 max mode,避免流程仪式化。
 
-### UI/UX Design Bridge (设计前置门卫)
-
-任何 UI 设计任务必经的前置 agent。它先确定目标品牌 (74 个可选: Linear / Stripe / Notion / Apple / Vercel / Spotify ...) → fetch 对应的 DESIGN.md → 输出 `instructions-{brand}.md` → 后续消费方是主 loop 的 skill 方案 (frontend-design plugin) 和 Frontend Developer。
-
-不跳过。即使是"改个按钮颜色",也先检查 design spec 存不存在。
-
 ---
 
 ## 致谢
 
 底层 agent 池原型来自 [msitarzewski/agency-agents](https://github.com/msitarzewski/agency-agents),命名风格 (Whimsy Injector / Rapid Prototyper / Reality Checker) 我直接保留了 —— 当 placeholder 比我自己想 12 个 division 名字省脑。
 
-真正改造的是上面那一层: Tier 分流、三层发现、SOUL/Memory、Design Bridge、Money Finder、Idea Maximum Mode 这些工作流,跟原 repo 已经没什么关系。
+真正改造的是上面那一层: Tier 分流、三层发现、SOUL/Memory、Money Finder、Idea Maximum Mode 这些工作流,跟原 repo 已经没什么关系。
 
 ---
 
