@@ -1,30 +1,34 @@
 #!/bin/sh
 
-# ratchet:begin
-# Installed by `ratchet init`; portable (no machine-specific paths), so it is safe to commit. Delete this block to uninstall.
-# The tool is $RATCHET_BIN, else `bin` in .ratchet.json (relative to the repo root), else `ratchet` on PATH.
-# Python is $RATCHET_PY, else python3 on PATH; it must be 3.10 or newer.
-if [ -n "${RATCHET_HOOK_PROBE:-}" ]; then
-  echo "ratchet-hook-probe post-commit"
+# house-rules:begin
+# Installed by `house-rules init`; portable (no machine-specific paths), so it is safe to commit. Delete this block to uninstall.
+# The tool is $HOUSE_RULES_BIN, else `bin` in .house-rules.json (relative to the repo root), else `house-rules` on PATH.
+# Python is $HOUSE_RULES_PY, else python3 on PATH; it must be 3.10 or newer.
+if [ -n "${HOUSE_RULES_HOOK_PROBE:-}" ]; then
+  echo "house-rules-hook-probe post-commit"
   exit 0
 fi
-# core.hooksPath can point many repos at one hooks directory; only repos with a config use ratchet.
-if [ -f .ratchet.json ]; then
-  RATCHET_PY="${RATCHET_PY:-python3}"
-  if "$RATCHET_PY" -c 'import sys; sys.exit(sys.version_info < (3, 10))' 2>/dev/null; then
-    if [ -z "${RATCHET_BIN:-}" ]; then
-      RATCHET_BIN=$("$RATCHET_PY" -c 'import json; print(json.load(open(".ratchet.json")).get("bin", ""))' 2>/dev/null || true)
-      if [ -z "$RATCHET_BIN" ]; then
-        RATCHET_BIN=$(command -v ratchet || true)
+# core.hooksPath can point many repos at one hooks directory; only repos with a config use house-rules.
+if [ -f .house-rules.json ]; then
+  _house_rules_py="${HOUSE_RULES_PY:-python3}"
+  if "$_house_rules_py" -c 'import sys; sys.exit(sys.version_info < (3, 10))' 2>/dev/null; then
+    _house_rules_bin="${HOUSE_RULES_BIN:-}"
+    if [ -z "$_house_rules_bin" ]; then
+      _house_rules_bin=$("$_house_rules_py" -c 'import json; print(json.load(open(".house-rules.json")).get("bin", ""))' 2>/dev/null || true)
+      if [ -z "$_house_rules_bin" ]; then
+        _house_rules_bin=$(command -v house-rules || true)
       fi
     fi
-    if [ -f "$RATCHET_BIN" ]; then
-      "$RATCHET_PY" "$RATCHET_BIN" infer --quiet || true
+    if [ -f "$_house_rules_bin" ]; then
+      "$_house_rules_py" "$_house_rules_bin" infer --quiet || true
+      [ -z "${CLAUDE_CODE_SESSION_ID:-}" ] || "$_house_rules_py" "$_house_rules_bin" auto note || true
     else
-      printf '%s\n' "ratchet: WARNING: cannot find the ratchet executable (set RATCHET_BIN, add \"bin\" to .ratchet.json, or put ratchet on PATH); post-commit is NOT running." >&2
+      printf '%s\n' "house-rules: WARNING: cannot find the house-rules executable (set HOUSE_RULES_BIN, add \"bin\" to .house-rules.json, or put house-rules on PATH); post-commit is NOT running." >&2
     fi
   else
-    printf '%s\n' "ratchet: WARNING: $RATCHET_PY is missing or older than Python 3.10 (set RATCHET_PY to a 3.10+ interpreter); post-commit is NOT running." >&2
+    printf '%s\n' "house-rules: WARNING: $_house_rules_py is missing or older than Python 3.10 (set HOUSE_RULES_PY to a 3.10+ interpreter); post-commit is NOT running." >&2
   fi
 fi
-# ratchet:end
+unset _house_rules_py _house_rules_bin
+# house-rules:end
+

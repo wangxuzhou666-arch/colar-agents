@@ -120,9 +120,11 @@ integrations/qwen/agents/
 .claude/handoffs/
 .local-verify/
 
-# ratchet:begin
+# house-rules 问题台账（本地，不进库）
 .style-findings.jsonl
-.ratchet-label-page.html
-.ratchet-label-batch.json
-.ratchet/reviews/
-# ratchet:end
+
+# house-rules:begin
+.house-rules-label-page.html
+.house-rules-label-batch.json
+.house-rules/
+# house-rules:end

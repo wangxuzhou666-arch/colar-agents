@@ -1,5 +1,8 @@
 {
-  "rules_files": ["CODING-STYLE.md"],
+  "rules_files": [
+    "CODING-STYLE.md"
+  ],
+  "wrapup_auto": false,
   "digest": "CODING-STYLE.digest.md",
   "inject_targets": [
     "engineering/engineering-code-reviewer.md",

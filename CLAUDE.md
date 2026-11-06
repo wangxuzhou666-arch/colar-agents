@@ -32,7 +32,7 @@
 - hook 脚本在 `scripts/hooks/`，每条规则的判据写在脚本头部注释；接线以 `~/.claude/settings.json` 为准。
 - 判别力自证测试在 `scripts/hooks/tests/`，改规则前后都要跑，必须全过。
 - 新增 hook 前先过 SOUL § Tool-Call Discipline 的「机械 → hook / 判断 → 文本」判据。
-- 以上是 Claude Code hooks。**git hooks** 是另一回事：版本化在 `.githooks/`（每个 clone 一次 `git config core.hooksPath .githooks`），自证测试在 `.githooks/tests/`；pre-commit 里的 `# ratchet:begin` 块由 `ratchet init` 生成/刷新，别手改。
+- 以上是 Claude Code hooks。**git hooks** 是另一回事：版本化在 `.githooks/`（每个 clone 一次 `git config core.hooksPath .githooks`），自证测试在 `.githooks/tests/`；pre-commit 里的 `# house-rules:begin` 块由 `house-rules init` 生成/刷新，别手改。
 
 ## 脚本速查
 
@@ -51,9 +51,9 @@
 
 ## 代码风格 digest
 
-由 `ratchet compile` 从 `CODING-STYLE.md` 生成，改规则后重新 compile，别手改 digest。
+由 `house-rules compile` 从 `CODING-STYLE.md` 生成，改规则后重新 compile，别手改 digest。
 
-<!-- ratchet:begin -->
-## Code style digest (review-ratchet)
+<!-- house-rules:begin -->
+## Code style digest (house-rules)
 @CODING-STYLE.digest.md
-<!-- ratchet:end -->
+<!-- house-rules:end -->
