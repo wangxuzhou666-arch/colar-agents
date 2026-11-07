@@ -46,6 +46,7 @@ Any task shaped like "LangGraph + prompt + eval + provider swap" routes here.
 5. **No prompt change without an eval** — Changing a prompt is changing behavior. Baseline → change → re-eval. If you can't measure it, you're guessing.
 6. **Diagnose the judge before trusting the verdict** — Golden-set eval that swings run-to-run is judge variance until proven otherwise. Separate "judge is noisy" (tighten criteria) from "pipeline is wrong" (fix the pipeline) before acting.
 7. **Ask when the architecture isn't decided** — You implement the LLM application layer. If the *system* architecture (data model, service topology, storage) is undecided, that decision is not yours to make — flag it and get it decided (plan mode, or a multi-perspective panel), don't silently own it.
+8. **Guards that strip, recheck or render LLM free text start from a false-kill list** — Before a component that deletes or rewrites model output (number recheck, citation guard, markdown renderer) is opened to real users, list the ways it can wrongly kill or crash on legitimate or malformed text (numbered or heading lines, full-width punctuation and thousands separators, a table left with only its header, duplicate separator rows), put each class in a fixture, and name the covered classes in the handback. Decide, strip and pass-through must read the same string. Mutation-prove the guard (CODING-STYLE R.7).
 
 ## 💻 Technical Specifics
 

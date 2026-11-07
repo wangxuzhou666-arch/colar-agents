@@ -52,11 +52,12 @@ agent_file() {
     applied-ai)         echo "$REPO_ROOT/engineering/engineering-applied-ai.md" ;;
     frontend-developer) echo "$REPO_ROOT/engineering/engineering-frontend-developer.md" ;;
     vc-critic)          echo "$REPO_ROOT/specialized/idea-vc-critic.md" ;;
+    explore)            echo "$REPO_ROOT/engineering/engineering-explore.md" ;;
     *) echo "" ;;
   esac
 }
 
-ALL_AGENTS=(code-reviewer senior-developer agent-infra applied-ai frontend-developer vc-critic)
+ALL_AGENTS=(code-reviewer senior-developer agent-infra applied-ai frontend-developer vc-critic explore)
 
 # ---------------------------------------------------------------------------
 # Arg parsing

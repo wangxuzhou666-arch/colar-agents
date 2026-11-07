@@ -367,3 +367,16 @@ SOUL 只留规则 + 度量脚本指针。下列数字、日期、口径均照搬
 - Strategic Frameworks 锚定页：织锦 2026-08-31 的三次实证（完整版在 `feedback_anchor_backbone_page.md`）。
 - Sync Discipline：「5 月 cleanup 那种 5 文件 SOUL 完全重复的腐烂」；4-类表权威归 `/save-memory` 为 2026-08-05 拍板；
   `memory_drift_check.sh` 2026-07-06 重写为单次 python 扫描，<0.2s，Stop hook 内真正跑得完。
+
+## 2026-11-07 — Reflexion 轮次 agent 正文改动（改前 / 改后）
+
+30 天轨迹 Reflexion 后，Colar 拍板落地 4 个 agent 的正文改动，按 Prompt-Edit Gate 改前改后各跑一次（judge 未换）：
+
+| agent | 改动 | 改前 | 改后 |
+|---|---|---|---|
+| senior-developer | 收窄「读所有文件」、补高风险代码自列对抗清单、事实断言先核一手来源（4 处，+5 行） | 4/4 | 4/4 |
+| applied-ai | 改写 LLM 文本的护栏开放前先列误杀类别进夹具（+1 行） | 3/4 + 1 ERROR（judge 两次非法 JSON） | 4/4 |
+| agent-infra | 删已退役的 pilot KPI gate 与 Stop 链旧描述（6 处，-12 行） | 4/4 | 4/4 |
+| explore | 只读边界（git fetch 算状态变更、临时文件只写 scratchpad）、联网检索不带私有内容（2 处，+10 行） | 2/2 | 2/2（readonly 一例 5→4，扣分点是编出的 scratchpad 会话 ID，环境所致） |
+
+- explore 本轮首次纳入 eval：新增 `cases/explore.jsonl`（2 条）与 `run-eval.sh` 映射。两条改前即过 → 只证明不退化，不证明改进；要测出差异需要能诱发越界的更难 case。
