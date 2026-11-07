@@ -8,12 +8,16 @@
 #   2026-11-05 实跑 9 个变异体全部转红：noreply 白名单放开（P1/P4/P8 等 12 例）、不排除已推送提交（P3）、
 #   忽略本条命令里新建的提交（P8）、查不到可见性按私有放行（P6）、不看提交者（P4）、默认 remote 一律 origin（P15）、
 #   不打码（G1/P1b）、不认 --delete（P10）、refspec 取冒号后的目的端（P11/P12）。
+#   2026-11-07 gh 可靠性补丁（P6b/P6c、P22-P25）实跑 4 个变异体全部转红：visibility 不把回退目录并进 env（P22）、
+#   修法文案改回 git config（P24/P25）、核实提示加到 public 分支（P24）、拦截文案不带原因（P6b/P23）。
+#   8 秒超时分支不进测试（假 gh 要 sleep 8 秒太慢），由人工读代码保证。
 #
 # 分组：P = 拦 / 放的判定；G = 输出契约与开销；ISO = 隔离自证。
 #
 # 隔离：仓库都在 mktemp 目录里 git init，remote 只是写进配置的 URL；「已推送」用 update-ref 造 remote-tracking 分支，
 #   不联网。gh 换成 PATH 最前面的假脚本，按 owner/repo 回答 private 字段并记下每次调用。GIT_CONFIG_GLOBAL=/dev/null +
 #   GIT_CONFIG_NOSYSTEM=1；hook 进程的 cwd 固定在非 git 目录，只靠 payload 里的 cwd 定位。结尾校验本仓 .git/config 字节未变。
+#   P22/P23 用 env -i 起 hook、PATH 只给 /usr/bin:/bin（有 git、python3，没有 gh），回退目录靠 PUSH_EMAIL_GH_DIRS 指向假 gh 所在目录。
 # 邮箱一律用 example.com 的假地址：本仓公开。判断退出码一律不走管道。
 set -u
 unset GIT_DIR GIT_INDEX_FILE GIT_WORK_TREE GIT_COMMON_DIR
@@ -118,6 +122,36 @@ expect_allow() {  # $1 标签 · $2 cwd · $3 命令串
   fi
 }
 
+run_guard_env() {   # $1 cwd · $2 命令串 · $3 hook 进程的 PATH · $4 PUSH_EMAIL_GH_DIRS → 同 run_guard，但 env -i 起 hook
+  python3 -c 'import json, sys
+print(json.dumps({"session_id": "t", "cwd": sys.argv[1], "hook_event_name": "PreToolUse",
+                  "tool_name": "Bash", "tool_input": {"command": sys.argv[2]}}))' "$1" "$2" \
+    | ( cd "$NONGIT" && env -i HOME="$FAKE_HOME" PATH="$3" PUSH_EMAIL_GH_DIRS="$4" \
+          GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 bash "$GUARD" ) \
+    | python3 -c 'import json, sys
+raw = sys.stdin.read().strip()
+if raw:
+    out = json.loads(raw)["hookSpecificOutput"]
+    print(out["permissionDecision"] + ": " + out["permissionDecisionReason"])'
+}
+
+expect_deny_env() {   # $1 标签 · $2 cwd · $3 命令串 · $4 PATH · $5 PUSH_EMAIL_GH_DIRS · $6.. reason 必含的片段
+  local label=$1 cwd=$2 cmd=$3 hook_path=$4 gh_dirs=$5 out piece ok=1
+  shift 5
+  out=$(run_guard_env "$cwd" "$cmd" "$hook_path" "$gh_dirs")
+  printf '%s' "$out" | grep -q '^deny: ' || ok=0
+  for piece in "$@"; do printf '%s' "$out" | grep -qF -- "$piece" || ok=0; done
+  if [ "$ok" = 1 ]; then pass=$((pass + 1)); else
+    fail=$((fail + 1)); echo "FAIL[deny] $label"; echo "   cmd: $cmd"; echo "   got: ${out:-<allow>}"; fi
+}
+
+expect_allow_env() {  # $1 标签 · $2 cwd · $3 命令串 · $4 PATH · $5 PUSH_EMAIL_GH_DIRS
+  local out
+  out=$(run_guard_env "$2" "$3" "$4" "$5")
+  if [ -z "$out" ]; then pass=$((pass + 1)); else
+    fail=$((fail + 1)); echo "FAIL[allow] $1"; echo "   cmd: $3"; echo "   got: $out"; fi
+}
+
 # ---------------- P 组：拦 / 放 ----------------
 expect_deny  "P1 fork 上的新提交带私人邮箱"                 "$LEAK" "git push fork fix"                        "wangxuzhou666-arch/slime"
 expect_deny  "P1b 文案点名 author，邮箱打码"                "$LEAK" "git push fork fix"                        "author c***@example.com"
@@ -126,6 +160,8 @@ expect_allow "P3 只有上游已推送的别人的提交"                "$UPONL
 expect_deny  "P4 作者 noreply、提交者是私人邮箱"            "$COMMITTER" "git push fork fix"                   "committer c***@example.com"
 expect_allow "P5 私有仓"                                    "$PRIVATE_REPO" "git push origin HEAD"
 expect_deny  "P6 gh 查不到可见性，按公开处理"               "$FLAKY" "git push origin HEAD"                    "按公开处理"
+expect_deny  "P6b 文案带 gh 的退出码"                       "$FLAKY" "git push origin HEAD"                    "gh 退出码 1"
+expect_deny  "P6c 查不到那一支提示先核实"                   "$FLAKY" "git push origin HEAD"                    "gh repo view flaky/repo --json visibility"
 expect_allow "P7 非 GitHub remote"                          "$HF" "git push origin HEAD"
 expect_deny  "P8 同一条命令里先提交再推，身份是私人邮箱"    "$NEWCOMMIT" "git add -A && git commit -m x && git push fork fix" "本条命令里新建的提交"
 expect_allow "P9 同上，身份是 noreply"                      "$NEWCOMMIT_OK" "git commit -m x && git push fork fix"
@@ -141,6 +177,48 @@ expect_deny  "P18 SSH 写法的 remote"                        "$SSH_FORK" "git 
 expect_allow "P19 子 shell 里的 cd 不外泄"                  "$NONGIT" "(cd $LEAK && git status) && git push fork fix"
 expect_allow "P20 remote 是变量：推断不了，放行"            "$LEAK" "git push \$REMOTE fix"
 expect_allow "P21 只是提到 push"                            "$LEAK" "echo push && git status"
+
+# P22/P23：hook 进程 PATH 里没有 gh。回退目录里有 gh → 识别出私有仓放行；回退目录里也没有 → 按公开处理，文案自带原因。
+BARE_PATH=/usr/bin:/bin
+EMPTY_DIR="$TMP/empty-dir"; mkdir -p "$EMPTY_DIR"
+if env -i PATH="$BARE_PATH" bash -c 'command -v gh' > /dev/null 2>&1; then
+  echo "SKIP P22/P23：$BARE_PATH 里本来就有 gh，造不出「PATH 里没有 gh」"
+else
+  expect_allow_env "P22 PATH 里没有 gh，回退目录里有：识别为私有仓" "$PRIVATE_REPO" "git push origin HEAD" "$BARE_PATH" "$FAKEBIN"
+  expect_deny_env  "P23 PATH 和回退目录都没有 gh：按公开处理，文案带原因和核实提示" "$PRIVATE_REPO" "git push origin HEAD" \
+    "$BARE_PATH" "$EMPTY_DIR" "gh 不在 PATH" "gh repo view"
+fi
+
+# P24：确认公开的那支，修法用 -c 传身份、不写本地配置，也不带「先核实」那句
+LEAK_OUT=$(run_guard "$LEAK" "git push fork fix")
+FIX_PREFIX='git -c user.name=wangxuzhou666-arch -c user.email='
+if printf '%s' "$LEAK_OUT" | grep -qF -- "$FIX_PREFIX" \
+   && ! printf '%s' "$LEAK_OUT" | grep -qF -- "git config user." \
+   && ! printf '%s' "$LEAK_OUT" | grep -qF -- "gh repo view"; then
+  pass=$((pass + 1))
+else
+  fail=$((fail + 1)); echo "FAIL P24 public 分支的文案契约（带 -c 修法 · 不含 git config user. · 不含 gh repo view）"; echo "   got: $LEAK_OUT"
+fi
+
+# P25：文案里的修法在临时仓里真能跑，author / committer 都变 noreply，且不往本地配置写 user.*
+# 提交里要有真改动：amend 一个空提交会被 git 拒绝（--allow-empty 才行），那不是文案要覆盖的场景
+FIXREPO="$TMP/fixrepo"; mk_fork "$FIXREPO"
+echo change > "$FIXREPO/file.txt"; git -C "$FIXREPO" add file.txt
+commit_as "$FIXREPO" "$PRIVATE" "$PRIVATE" "fix"
+FIX_CMD=$(printf '%s' "$LEAK_OUT" | grep -m1 -oE 'git -c user\.name=[^ ]+ -c user\.email=[^ ]+ commit --amend --no-edit --reset-author')
+if [ -z "$FIX_CMD" ]; then
+  fail=$((fail + 1)); echo "FAIL P25 从拦截文案里取不到修法命令：$LEAK_OUT"
+else
+  ( cd "$FIXREPO" && bash -c "$FIX_CMD" ) > /dev/null 2>&1
+  NEW_IDENTITY=$(git -C "$FIXREPO" log -1 --format='%ae %ce')
+  LOCAL_USER=$(git -C "$FIXREPO" config --local --get-regexp '^user\.' 2>/dev/null)
+  if [ "$NEW_IDENTITY" = "${NEW_IDENTITY%% *} ${NEW_IDENTITY%% *}" ] \
+     && [[ "${NEW_IDENTITY%% *}" == *@users.noreply.github.com ]] && [ -z "$LOCAL_USER" ]; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1)); echo "FAIL P25 修法执行后身份不对或污染了本地配置：identity=[$NEW_IDENTITY] local_user=[$LOCAL_USER]"
+  fi
+fi
 
 # ---------------- G 组：输出契约与开销 ----------------
 out=$(run_guard "$LEAK" "git push fork fix")

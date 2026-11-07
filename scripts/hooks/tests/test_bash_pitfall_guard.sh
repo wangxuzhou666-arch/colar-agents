@@ -4,9 +4,11 @@
 # 跑法：bash scripts/hooks/tests/test_bash_pitfall_guard.sh
 # 变异验证：GUARD=<改坏一条规则的副本> bash 本脚本 → 该规则的正例必须转红，否则用例没有判别力。
 #
-# 规则 6 / 7 / 8 / 9 的判定器（zsh_wordsplit_check.py / zsh_modifier_check.py / docker_prune_check.py /
-# git_safety_check.py，后两个共用 shell_segments.py）按 guard 自身所在目录查找，所以变异时要把 guard 副本和
-# 这五个 .py 一起拷进同一个临时目录，再改其中一个。
+# 规则 5 / 6 / 7 / 8 / 9 的判定器（pipe_status_check.py / zsh_wordsplit_check.py / zsh_modifier_check.py /
+# docker_prune_check.py / git_safety_check.py，其中 pipe_status_check、docker_prune_check、git_safety_check 共用
+# shell_segments.py）按 guard 自身所在目录查找，所以变异时要把 guard 副本和这六个 .py 一起拷进同一个临时目录，
+# 再改其中一个。规则 5 的变异清单：邻接判定改回「整串有 | 且有 $?」→ 误拦类反例转红；清空末段白名单 → deny 正例转红；
+# 去掉 pipestatus / pipefail 豁免 → 对应反例转红；live 判定改看剥引号后的词 → 单引号 / heredoc / bash -c 反例转红。
 #
 # 每条规则至少 2 正 2 反，反例优先覆盖规则本身明写的放行例外（venv 绝对路径、cd 锚定、引号等），
 # 因为那些例外才是最容易被后来人"顺手收紧"改坏的部分。
@@ -17,11 +19,21 @@ GUARD=${GUARD:-$HERE/../bash_pitfall_guard.sh}
 pass=0
 fail=0
 
+# 规则 4 靠 payload 的 cwd 字段判断：BARE_DIR 没有 .venv（相当于漂回裸 home），VENV_DIR 自带 .venv/bin
+BARE_DIR=$(mktemp -d)
+VENV_DIR=$(mktemp -d)
+mkdir -p "$VENV_DIR/.venv/bin"
+trap 'rm -rf "$BARE_DIR" "$VENV_DIR"' EXIT
+
 run_guard() {
-  # $1 = 命令串（可多行）→ 包成 PreToolUse(Bash) 的 stdin JSON 喂给 guard，
+  # $1 = 命令串（可多行）· $2 = 可选 cwd（不给则 payload 不带 cwd 字段）
+  # → 包成 PreToolUse(Bash) 的 stdin JSON 喂给 guard，
   # 再把 guard 的 JSON 解回 "deny: <reason>" 一行文本（reason 是中文，json.dumps 会转成 \uXXXX，直接 grep 对不上）
-  printf '%s' "$1" | python3 -c 'import json,sys
-print(json.dumps({"tool_name":"Bash","tool_input":{"command":sys.stdin.read()}}))' | bash "$GUARD" | python3 -c 'import json,sys
+  printf '%s' "$1" | CWD="${2:-}" python3 -c 'import json,os,sys
+payload = {"tool_name":"Bash","tool_input":{"command":sys.stdin.read()}}
+if os.environ["CWD"]:
+    payload["cwd"] = os.environ["CWD"]
+print(json.dumps(payload))' | bash "$GUARD" | python3 -c 'import json,sys
 raw = sys.stdin.read().strip()
 if raw:
     out = json.loads(raw)["hookSpecificOutput"]
@@ -29,9 +41,9 @@ if raw:
 }
 
 expect_deny() {
-  # $1 标签 · $2 命令串 · $3 reason 必含的片段（把 deny 钉到具体哪条规则，防止"被别的规则顺手拦下"冒充通过）
+  # $1 标签 · $2 命令串 · $3 reason 必含的片段（把 deny 钉到具体哪条规则，防止"被别的规则顺手拦下"冒充通过）· $4 可选 cwd
   local out
-  out=$(run_guard "$2")
+  out=$(run_guard "$2" "${4:-}")
   if printf '%s' "$out" | grep -q '^deny: ' && printf '%s' "$out" | grep -qF -- "$3"; then
     pass=$((pass + 1))
   else
@@ -43,9 +55,9 @@ expect_deny() {
 }
 
 expect_allow() {
-  # $1 标签 · $2 命令串
+  # $1 标签 · $2 命令串 · $3 可选 cwd
   local out
-  out=$(run_guard "$2")
+  out=$(run_guard "$2" "${3:-}")
   if [ -z "$out" ]; then
     pass=$((pass + 1))
   else
@@ -56,38 +68,55 @@ expect_allow() {
   fi
 }
 
-# ---- 规则 1：--include/--exclude 的 glob 未加引号 ----
-expect_deny  "R1 裸 --include=*.py"            "grep -rn foo --include=*.py ."                     "include"
-expect_deny  "R1 裸 --exclude=*.pyc"           "grep -rn foo --exclude=*.pyc src"                  "include"
-expect_allow "R1 单引号 --include='*.py'"      "grep -rn foo --include='*.py' ."
-expect_allow "R1 双引号 --include=\"*.py\""    "grep -rn foo --include=\"*.py\" ."
-
-# ---- 规则 2：路由组 / 动态段括号路径未加引号 ----
-expect_deny  "R2 裸 (console) 路径"            "git diff frontend/src/app/(console)/page.tsx"      "glob 元字符"
-expect_deny  "R2 裸 [id] 路径"                 "test -f src/app/hub/[id]/page.tsx"                 "glob 元字符"
-expect_allow "R2 单引号包住 (console)"         "git diff 'frontend/src/app/(console)/page.tsx'"
-expect_allow "R2 双引号包住 [id]"              "ls \"src/app/[id]\""
-expect_allow "R2 \$(git rev-parse) 不是路径括号" "git log \$(git rev-parse HEAD)..HEAD --oneline"
-
-# ---- 规则 3：系统 python3 跑 pytest ----
-expect_deny  "R3 python3 -m pytest"            "python3 -m pytest api/tests -q"                    "系统 python3"
-expect_deny  "R3 python3 -m unittest"          "cd /Users/colar/x && python3 -m unittest discover" "系统 python3"
-expect_allow "R3 绝对路径 .venv 的 python"     "/Users/colar/Desktop/x/.venv/bin/python -m pytest -q"
-expect_allow "R3 cd 锚定后 .venv/bin/python3"  "cd /Users/colar/Desktop/x && .venv/bin/python3 -m pytest -q"
-expect_allow "R3 python3 -c 不是跑 pytest"     "python3 -c \"import pytest; print(pytest.__version__)\""
-
 # ---- 规则 4：相对路径 source .venv / 裸 .venv 可执行 ----
-expect_deny  "R4 source .venv/bin/activate"    "source .venv/bin/activate && pytest -q"            "cwd 会漂"
-expect_deny  "R4 裸 .venv/bin/python"          ".venv/bin/python scripts/x.py"                     "cwd 会漂"
-expect_allow "R4 绝对路径 .venv"               "/Users/colar/Desktop/创业/fabric-agent-demo/.venv/bin/python -m pytest"
-expect_allow "R4 同条命令先 cd 绝对路径"       "cd /Users/colar/Desktop/x && .venv/bin/python -m pytest"
-expect_allow "R4 cd \$(git rev-parse --show-toplevel) 锚定" "cd \$(git rev-parse --show-toplevel) && source .venv/bin/activate"
+# 放行三条件：cwd 自带 .venv/bin（或 payload 没有 cwd，fail-open）· 命令含 wt run · 命令里已有 cd / pushd。
+# 下面所有 allow 例都带 BARE_DIR（cwd 无 .venv），否则会被「读不到 cwd 就放行」冒充通过。
+expect_deny  "R4 source .venv/bin/activate"    "source .venv/bin/activate && pytest -q"            "cwd 会漂" "$BARE_DIR"
+expect_deny  "R4 裸 .venv/bin/python"          ".venv/bin/python scripts/x.py"                     "cwd 会漂" "$BARE_DIR"
+expect_deny  "R4 wt 不带 run 不算锚定"         "bash ~/Desktop/colar-agents/scripts/wt list; .venv/bin/python -m pytest" "cwd 会漂" "$BARE_DIR"
+expect_deny  "R4 cd 只是词的一部分不算锚定"    "echo abcd /x; .venv/bin/python -m pytest"           "cwd 会漂" "$BARE_DIR"
+expect_allow "R4 绝对路径 .venv"               "/Users/colar/Desktop/proj/.venv/bin/python -m pytest" "$BARE_DIR"
+expect_allow "R4 同条命令先 cd 绝对路径"       "cd /Users/colar/Desktop/x && .venv/bin/python -m pytest" "$BARE_DIR"
+expect_allow "R4 cd \$(git rev-parse --show-toplevel) 锚定" "cd \$(git rev-parse --show-toplevel) && source .venv/bin/activate" "$BARE_DIR"
+expect_allow "R4 wt run 已锚定 cwd"            "bash ~/Desktop/colar-agents/scripts/wt run orchestration env PYTHON_DOTENV_DISABLED=1 .venv/bin/python -m pytest" "$BARE_DIR"
+expect_allow "R4 cd \$W 变量目录"              "cd \$W && .venv/bin/python -m pytest" "$BARE_DIR"
+expect_allow "R4 cd \"\$W\" 带引号变量目录"    "cd \"\$W\" && .venv/bin/python -m pytest" "$BARE_DIR"
+expect_allow "R4 cd ~/x 家目录相对"            "cd ~/Desktop/x && source .venv/bin/activate" "$BARE_DIR"
+expect_allow "R4 pushd 也算锚定"               "pushd /Users/colar/Desktop/x >/dev/null && .venv/bin/python -m pytest" "$BARE_DIR"
+expect_allow "R4 cwd 自带 .venv/bin"           ".venv/bin/python scripts/x.py" "$VENV_DIR"
+expect_allow "R4 cwd 自带 .venv 时 source 也放行" "source .venv/bin/activate && pytest -q" "$VENV_DIR"
+expect_allow "R4 payload 没有 cwd 则 fail-open" ".venv/bin/python scripts/x.py"
 
-# ---- 规则 5：管道后判退出码 ----
+# ---- 规则 5：管道末段是展示型过滤器，紧接着就判 $? ----
+# 命中 = live 的 $? 紧邻在「末段属 tail head cut tee sed tr wc sort cat 的真管道」之后；其余一律放行。
 expect_deny  "R5 管道后 echo \$?"              "pytest -q | tail -3; echo \$?"                     "管道"
 expect_deny  "R5 tee 后 if [ \$? -ne 0 ]"      $'make 2>&1 | tee log.txt\nif [ $? -ne 0 ]; then exit 1; fi' "管道"
+expect_deny  "R5 |& 之后 rc=\$?"               "pytest -q |& tail -3; rc=\$?"                       "管道"
+expect_deny  "R5 大写 PIPESTATUS 不豁免"       "pytest | tail -3; echo \${PIPESTATUS[0]:-\$?}"     "管道"
+expect_deny  "R5 双引号里的 \$? 是 live"       "pytest | head -5; echo \"rc=\$?\""                  "管道"
+expect_deny  "R5 \$? 在 && 之后"               "git status --short | head -10 && echo \$?"         "管道"
+expect_deny  "R5 管道断行续写"                 $'pytest -q |\n  tail -3; echo $?'                  "管道"
+expect_deny  "R5 括号包住的管道"               "(uv run pytest 2>&1 | tail -15); echo \"exit: \$?\"" "管道"
+expect_deny  "R5 命令替换包住的管道"           "x=\$(pytest | tail -3); echo \$?"                   "管道"
+expect_deny  "R5 deny 文案点名末段"            "pytest -q | tail -3; echo \$?"                     "管道末段 tail"
 expect_allow "R5 无管道的 \$?"                 "pytest -q; echo \$?"
 expect_allow "R5 管道用 pipestatus"            "pytest -q | tail -3; echo \${pipestatus[1]}"
+expect_allow "R5 pipestatus 带 \$? 兜底"       "pytest -q | tail -3; echo \${pipestatus[1]:-\$?}"
+expect_allow "R5 heredoc 正文里的 rc=\$?"      $'cat > f.sh <<\'EOF\'\nmake | tee log; echo rc=$?\nEOF\nls | wc -l'
+expect_allow "R5 \$? 跟在非管道命令后"         "cmd > f 2>&1; echo exit=\$?; git status | wc -l"
+expect_allow "R5 \$? 在管道之前"               "echo exit \$? | tee -a log"
+expect_allow "R5 set -o pipefail"              "set -o pipefail; pytest -q | tail -3; echo \$?"
+expect_allow "R5 setopt pipefail"              "setopt pipefail; pytest -q | tail -3; echo \$?"
+expect_allow "R5 bash -c 单引号里的内层脚本"   "bash -c 'pytest | tail -3; echo \$?'"
+expect_allow "R5 单引号里的 \$?"               "pytest | tail -3; echo '\$?'"
+expect_allow "R5 反斜杠转义的 \$?"             "pytest | tail -3; echo \\\$?"
+expect_allow "R5 || 不是管道"                  "a || b; echo \$?"
+expect_allow "R5 \$? 与管道之间隔了别的命令"   "pytest | tail -3; echo done; echo \$?"
+expect_allow "R5 管道但没有 \$?"               "grep x f | head -30"
+expect_allow "R5 || 链但没有管道"              "command -v x || echo no"
+expect_allow "R5 末段 grep 放行"               "git diff --stat | grep -c foo; echo n=\$?"
+expect_allow "R5 末段 xargs 放行"              "ls | xargs wc -l; echo \$?"
+expect_deny  "R5 管道后接 || 链也是末段码"    "pytest | tail -3 || echo \$?"                      "管道"
 
 # ---- 规则 6：zsh 不对裸 $VAR 分词 ----
 # 正例 1 = 2026-09-15 织锦原始实例（grep -rlE 管道赋值 → pytest $FILES，30 路径当 1 参数）

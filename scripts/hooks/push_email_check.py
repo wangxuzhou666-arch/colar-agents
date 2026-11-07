@@ -25,6 +25,9 @@ OWN_NOREPLY = "229157273+wangxuzhou666-arch@users.noreply.github.com"   # 已出
 PUSH_VALUE_OPTS = {"-o", "--push-option", "--receive-pack", "--exec", "--repo"}
 PUSH_ALL_BRANCHES = {"--all", "--branches", "--mirror"}
 MAX_LISTED = 3
+# hook 进程的 PATH 可能不含 homebrew 目录（gh 就装在那里），查 gh 前追加到 PATH 末尾。
+# 环境变量只给测试当接缝用（造「gh 不在 PATH」），生产不设。
+GH_FALLBACK_DIRS = os.environ.get("PUSH_EMAIL_GH_DIRS", "/opt/homebrew/bin:/usr/local/bin")
 
 
 def push_plan(push_args):
@@ -106,26 +109,46 @@ def outgoing_hits(repo_dir, revs, head_moved):
 
 
 def visibility(slug):
-    """GitHub 仓的可见性：'private' / 'public'；gh 查不到（未登录、断网、无权限）→ None。"""
+    """GitHub 仓的可见性 → (seen, why)。seen 是 'private' / 'public'；gh 查不到（未登录、断网、无权限、
+    hook 进程 PATH 里没有 gh）为 None，why 是 None 时的短原因，成功时为 ''。
+
+    hook 进程的 PATH 可能不带 homebrew 目录，所以把 GH_FALLBACK_DIRS 追加在 PATH 末尾（PATH 里已有的 gh 优先）；
+    POSIX 下 subprocess 按传入 env 的 PATH 找可执行文件。8 秒超时分支慢到没法进测试，靠人工读代码保证。"""
+    path = ":".join(part for part in (os.environ.get("PATH", ""), GH_FALLBACK_DIRS) if part)
     try:
         proc = subprocess.run(["gh", "api", f"repos/{slug[0]}/{slug[1]}", "--jq", ".private"],
-                              capture_output=True, text=True, timeout=8, check=False)
-    except (OSError, subprocess.TimeoutExpired):
-        return None
+                              capture_output=True, text=True, timeout=8, check=False, env={**os.environ, "PATH": path})
+    except FileNotFoundError:
+        return None, "gh 不在 PATH"
+    except OSError as error:
+        return None, f"gh 不在 PATH（{type(error).__name__}）"
+    except subprocess.TimeoutExpired:
+        return None, "超时 8s"
+    if proc.returncode != 0:
+        stderr_lines = proc.stderr.strip().splitlines()
+        detail = f": {stderr_lines[0][:80]}" if stderr_lines else ""
+        return None, f"gh 退出码 {proc.returncode}{detail}"
     flag = proc.stdout.strip()
-    if proc.returncode != 0 or flag not in ("true", "false"):
-        return None
-    return "private" if flag == "true" else "public"
+    if flag not in ("true", "false"):
+        return None, "gh 输出异常"
+    return ("private" if flag == "true" else "public"), ""
 
 
-def deny_text(slug, hits, seen):
-    where = f"{slug[0]}/{slug[1]}" + ("（gh 查不到它的可见性，按公开处理）" if seen is None else "")
+def deny_text(slug, hits, seen, why):
+    repo = f"{slug[0]}/{slug[1]}"
+    # 只有「查不到」这一支可能是误拦（私有仓被当公开仓），才提示先核实；确认公开的那支不带这句
+    where = f"{repo}（gh 查不到它的可见性：{why}，按公开处理）" if seen is None else repo
+    verify = (f"先 gh repo view {repo} --json visibility 核实；是 PRIVATE 就是钩子误拦：不要改写提交，直接告诉 Colar。"
+              if seen is None else "")
     listed = "；".join(hits[:MAX_LISTED]) + (f"，共 {len(hits)} 处" if len(hits) > MAX_LISTED else "")
+    # 修法用 -c 传身份，不写本地 git config（某些项目的 CLAUDE.md 把本地 user.* 当配置污染）；
+    # 2026-11-06 用临时仓实测：-c 经 GIT_CONFIG_PARAMETERS 传进 rebase --exec 的子进程，作者和提交者都变 noreply
+    identity = f"git -c user.name=wangxuzhou666-arch -c user.email={OWN_NOREPLY}"
     return (f"⛔ push-email-guard: 要推到公开仓 {where} 的提交带着非 GitHub noreply 邮箱：{listed}。"
             "公开仓的提交邮箱人人可见，推上去就收不回（Colar 2026-11-05 定：推到公开仓只用 noreply 身份）。"
-            f"修法：git config user.name wangxuzhou666-arch && git config user.email {OWN_NOREPLY}，"
-            "再 git commit --amend --no-edit --reset-author（多个提交：git rebase -r <基点> --exec "
-            "'git commit --amend --no-edit --reset-author'）。确实要推别人的提交时，交给 Colar 自己推。")
+            f"修法：{identity} commit --amend --no-edit --reset-author"
+            f"（多个提交：{identity} rebase -r <基点> --exec 'git commit --amend --no-edit --reset-author'）。"
+            f"确实要推别人的提交时，交给 Colar 自己推。{verify}")
 
 
 def judge_push(push_args, repo_dir, head_moved):
@@ -136,8 +159,8 @@ def judge_push(push_args, repo_dir, head_moved):
     hits = outgoing_hits(repo_dir, revs, head_moved)
     if not hits:
         return None
-    seen = visibility(slug)
-    return None if seen == "private" else deny_text(slug, hits, seen)
+    seen, why = visibility(slug)
+    return None if seen == "private" else deny_text(slug, hits, seen, why)
 
 
 def judge_command(cmd, ctx):

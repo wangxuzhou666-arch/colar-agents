@@ -12,8 +12,13 @@
   - 命令词前的 VAR=… 赋值、if / do / ! 等保留字、sudo / env / xargs / nice / timeout 包装都跳过；
     赋值词收进集合交给 leaf（放行前缀 ALLOW_*=1 就靠它，也认 sudo / env 之后的赋值）
   - ssh host '…' 是远端命令、用变量间接调用（d=docker; $d rmi x）都不检查
+
+另一个入口 split_segments_detail(cmd)：同一套切词，但每段多带「每词是否含引号字符、每词的会展开文本、
+与前一段之间的结束符」，给要区分 '$?' 与 $?、要认管道邻接关系的判定器用（pipe_status_check.py）。
+split_segments 是它的薄包装，返回形状不变（规则 8 / 9 在用）。
 """
 import re
+from typing import NamedTuple
 
 ASSIGN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 SHELL_C = re.compile(r"-[A-Za-z]*c[A-Za-z]*")    # bash -c / -lc / -ec
@@ -31,6 +36,18 @@ WRAPPERS = {
 }
 SHELLS = {"bash", "sh", "zsh", "dash", "ksh"}
 MAX_DEPTH = 3
+# 结束符落在空段上时也要覆盖前一个结束符的「硬边界」：括号 / 命令替换 / 反引号 / 后台符会换掉执行上下文，
+# 邻接判定不能跨过去；其余结束符（尤其续行的换行）落在空段上则沿用前一个，如 `a |<换行>b` 里 b 仍接在 | 后面。
+# 例外是收括号 ")"：它后面再跟 ; 换行 && || 时，以后者为准（见 split_segments_detail.end_segment）
+HARD_TERMINATORS = {"(", ")", "`", "$(", "&"}
+NOT_LIVE = "\x00"  # 会展开文本里，被单引号 / 反斜杠保护的字符的占位
+
+
+class Segment(NamedTuple):
+    words: list        # 与 split_segments 同口径：引号已剥
+    quoted: list       # 每词是否含引号 / 反斜杠转义（'$?' 与 $? 剥引号后是同一个词，靠它区分）
+    live: list         # 每词「会展开」的文本：单引号内与反斜杠转义的字符换成 NOT_LIVE，其余同 words
+    sep_before: str    # 与前一段之间的结束符：| |& || && ; 换行 & ( ) ` $(；首段为 ""
 
 
 def skip_heredoc_bodies(cmd, i, heredocs):
@@ -48,57 +65,78 @@ def skip_heredoc_bodies(cmd, i, heredocs):
 def split_segments(cmd):
     """把命令串切成简单命令的词列表；引号内是字面量，注释与 heredoc 正文跳过。
     引号不平衡返回 None（调用方放行）。"""
-    segments, words, word = [], [], []
-    has_word = False
+    segments = split_segments_detail(cmd)
+    return None if segments is None else [segment.words for segment in segments]
+
+
+def split_segments_detail(cmd):
+    """切词的真身：返回 Segment 列表，引号不平衡返回 None（调用方放行）。"""
+    segments, words, quoted, live = [], [], [], []
+    word, live_word = [], []
+    has_word = word_quoted = False
+    pending_sep = ""   # 上一段的结束符，也就是下一个非空段的 sep_before
     heredocs = []
     i, n = 0, len(cmd)
 
+    def add(text, live_text=None, protected=False):
+        nonlocal has_word, word_quoted
+        word.append(text)
+        live_word.append(text if live_text is None else live_text)
+        has_word = True
+        word_quoted = word_quoted or protected
+
     def end_word():
-        nonlocal word, has_word
+        nonlocal word, live_word, has_word, word_quoted
         if has_word:
             words.append("".join(word))
-        word, has_word = [], False
+            quoted.append(word_quoted)
+            live.append("".join(live_word))
+        word, live_word, has_word, word_quoted = [], [], False, False
 
-    def end_segment():
-        nonlocal words
+    def end_segment(terminator):
+        nonlocal words, quoted, live, pending_sep
         end_word()
         if words:
-            segments.append(words)
-        words = []
+            segments.append(Segment(words, quoted, live, pending_sep))
+            pending_sep = terminator
+        elif terminator in HARD_TERMINATORS or pending_sep == ")":
+            # 空段上只有硬边界覆盖前一个结束符，其余（续行 / 空行的换行等）沿用；
+            # 收括号后面紧跟的 ; 换行 && || 才是下一条命令前真正的分隔（(a | b); echo $? 里 $? 仍是 b 的状态）
+            pending_sep = terminator
+        words, quoted, live = [], [], []
 
     while i < n:
         c = cmd[i]
         if c == "\\":
             if i + 1 < n and cmd[i + 1] != "\n":  # 反斜杠换行 = 续行，直接吞掉
-                word.append(cmd[i + 1])
-                has_word = True
+                add(cmd[i + 1], NOT_LIVE, protected=True)
             i += 2
         elif c == "'":
             close = cmd.find("'", i + 1)
             if close < 0:
                 return None
-            word.append(cmd[i + 1:close])
-            has_word = True
+            add(cmd[i + 1:close], NOT_LIVE * (close - i - 1), protected=True)
             i = close + 1
         elif c == '"':
-            j, buf = i + 1, []
+            j, buf, live_buf = i + 1, [], []
             while j < n and cmd[j] != '"':
                 if cmd[j] == "\\" and j + 1 < n:
                     buf.append(cmd[j + 1])
+                    live_buf.append(NOT_LIVE)
                     j += 2
                 else:
                     buf.append(cmd[j])
+                    live_buf.append(cmd[j])
                     j += 1
             if j >= n:
                 return None
-            word.append("".join(buf))
-            has_word = True
+            add("".join(buf), "".join(live_buf), protected=True)
             i = j + 1
         elif c == "#" and not has_word:
             nl = cmd.find("\n", i)
             i = n if nl < 0 else nl
         elif c == "\n":
-            end_segment()
+            end_segment("\n")
             i = skip_heredoc_bodies(cmd, i + 1, heredocs)
             heredocs = []
         elif c in " \t":
@@ -131,30 +169,29 @@ def split_segments(cmd):
                 heredocs.append(("".join(delim), strip_tabs))
             i = j
         elif cmd.startswith("$(", i):
-            end_segment()
+            end_segment("$(")
             i += 2
         elif c in ";()`":
-            end_segment()
+            end_segment(c)
             i += 1
         elif c == "|":
-            end_segment()
-            i += 2 if cmd.startswith("||", i) or cmd.startswith("|&", i) else 1
+            terminator = cmd[i:i + 2] if cmd.startswith("||", i) or cmd.startswith("|&", i) else "|"
+            end_segment(terminator)
+            i += len(terminator)
         elif c == "&":
             if cmd.startswith("&&", i):
-                end_segment()
+                end_segment("&&")
                 i += 2
             elif (i > 0 and cmd[i - 1] in "<>") or cmd.startswith("&>", i):
-                word.append(c)  # 2>&1 / &> file 是重定向，不是后台符
-                has_word = True
+                add(c)  # 2>&1 / &> file 是重定向，不是后台符
                 i += 1
             else:
-                end_segment()
+                end_segment("&")
                 i += 1
         else:
-            word.append(c)
-            has_word = True
+            add(c)
             i += 1
-    end_segment()
+    end_segment("")
     return segments
 
 

@@ -114,7 +114,7 @@ if ceiling_hit:
     print(f"[context-ceiling::hook-only] 当前 context {ctx/1000:.0f}K，已过硬上限 {ceiling//1000}K"
           f"（大模型 smart zone 的界限，过线推理质量下降）。"
           f"主 loop context 每轮全量重发，到这个水位每次工具调用都在重付 {ctx/1000:.0f}K —— "
-          f"任务一到断点就 /handoff 换 session（或 /compact 就地压缩）。"
+          f"建议 Colar 用 /compact 就地压缩，进度已落盘的话不必换 session；/handoff 换 session 只在 Colar 提出或你们明确要换时再提，同一 session 提过就别重复。"
           f"这不是早期误报区间：起手基线才 55-70K。")
 
 # 去重：同一段连读会跨多轮 prompt 存在（没新 Read 也没 Edit 时计数不变），

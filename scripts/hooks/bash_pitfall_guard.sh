@@ -15,7 +15,7 @@
 #
 # 自证测试：bash scripts/hooks/tests/test_bash_pitfall_guard.sh —— 每条规则都有正例（必 deny）
 # 与反例（必放行，含各规则明写的放行例外）。改任何规则先跑它；新规则不带正反用例不许进。
-# 已知限制：heredoc 正文也在被扫的命令串里（规则 8 / 9 除外，它们的判定器会跳过 heredoc 正文），
+# 已知限制：heredoc 正文也在被扫的命令串里（规则 5 / 8 / 9 除外，它们的判定器会跳过 heredoc 正文），
 #           往文件里写含这些形状的内容请用 Write/Edit 工具。
 
 input=$(cat 2>/dev/null || true)
@@ -28,57 +28,64 @@ except Exception: pass' 2>/dev/null || true)
 
 suggest=""
 
-# ---- 规则 1：--include/--exclude 的 glob 未加引号 ----
-# zsh 会先行展开 *，当前目录没有匹配就整条命令报 "no matches found" 直接不执行。
-# 实证复现：2026-07-23 / 07-28 / 09-03 三次，跨 2 个月。
-if printf '%s' "$cmd" | grep -qE -- "--(include|exclude)=[^'\"[:space:]]*\*"; then
-  suggest="zsh 会展开 --include=*.py 里的 * ，当前目录无匹配则整条命令报 \"no matches found\" 不执行。加引号：--include='*.py'"
-fi
+# ---- 规则 1 已退役（2026-11-07）：~/.zshenv 在 Claude Code 里开了 nonomatch，无匹配的 glob 原样传给命令；编号保留不重排 ----
 
-# ---- 规则 2：Next.js 路由组 / 动态段括号路径未加引号 ----
-# (console) (studio) [id] 在 zsh 里是 glob 元字符，不加引号会被静默吞掉，
-# 于是 git diff / test -f 在残缺的文件集上作业，且不报错。
-if [ -z "$suggest" ]; then
-  # 先剥掉所有引号包裹的片段，剩下的才是裸露部分
-  bare=$(printf '%s' "$cmd" | sed "s/'[^']*'//g; s/\"[^\"]*\"//g")
-  if printf '%s' "$bare" | grep -qE '/\([a-z_]+\)|/\[[a-z_]+\]'; then
-    suggest="路径里的 (console)/(studio)/[id] 在 zsh 里是 glob 元字符，不加引号会被静默吞掉（命令照跑、文件集残缺、不报错）。整个路径加单引号，或命令前加 noglob"
-  fi
-fi
+# ---- 规则 2 已退役（2026-11-06）：30 天 58 次拦截 0 次真裸露，zsh 对裸括号路径自己会报 no matches；编号保留不重排 ----
 
-# ---- 规则 3：拿系统 python3 跑 pytest ----
-# 系统 python3 没装 pytest；实证 2026-07-24/25/27 三天 8 次。
-if [ -z "$suggest" ]; then
-  case "$cmd" in
-    *python3\ -m\ pytest*|*python3\ -m\ unittest*)
-      case "$cmd" in
-        */.venv/bin/*|*venv/bin/python*) : ;;   # 已经走 venv，放行
-        *) suggest="系统 python3 没装 pytest（实测 8 次）。用 repo 的 .venv/bin/python -m pytest，绝对路径起手" ;;
-      esac ;;
-  esac
-fi
+# ---- 规则 3 已退役（2026-11-06）：30 天 9/9 误拦、0 真阳性；编号保留不重排 ----
 
 # ---- 规则 4：相对路径 source .venv / 裸 .venv 可执行 ----
 # cwd 会漂回裸 home（/Users/colar），相对 .venv 必 exit 127。
 # 实证：07-30 / 08-23 / 08-25 / 09-09 / 09-10 / 09-11 多次，是全库复现最多的一类。
+# 2026-11 审计：30 天 207 次拦截人工 64 条样本真阳性 0 —— cwd 自带 .venv 的占 55%，
+# 与 wt-discipline 要求的 wt run <名> .venv/bin/python 正面冲突，所以只在「拿不出 cwd 已锚定的证据」时拦。
+# 放行（任一成立）：
+#   (a) hook stdin 的 cwd 字段读不到（fail-open），或 <cwd>/.venv/bin 真实存在 —— 相对 .venv 解析得到；
+#   (b) 命令含 wt run —— wt 的 cmd_run 是 ( cd "$path" && "$@" )，cwd 已锚定；
+#   (c) 命令里已有 cd / pushd 词（cd /abs、cd $W、cd "$W"、cd ~/x、cd $(git rev-parse …) 都算）。
+# 三者都不成立才拦：cwd 在无 .venv 的目录（如裸 home），又没有任何锚定动作。不做引号 / heredoc / for 列表感知。
 if [ -z "$suggest" ]; then
   if printf '%s' "$cmd" | grep -qE '(^|[[:space:];&|])(source[[:space:]]+)?\.venv/bin/'; then
-    # 同一条命令里已先 cd 到绝对路径（或 cd $(git rev-parse --show-toplevel)）才用相对 .venv，
-    # 是 fabric-loop Phase 2 的推荐写法，cwd 已锚定，放行 —— 拦它会把模型逼进死胡同。
-    if printf '%s' "$cmd" | grep -qE 'cd[[:space:]]+("|'"'"')?(/|\$\(git[[:space:]]+rev-parse)'; then
-      : # 已锚定 cwd，放行
+    hook_cwd=$(printf '%s' "$input" | python3 -c 'import json,sys
+try: print(json.load(sys.stdin).get("cwd","") or "")
+except Exception: pass' 2>/dev/null || true)
+    if [ -z "$hook_cwd" ] || [ -d "$hook_cwd/.venv/bin" ]; then
+      : # (a) cwd 读不到，或 cwd 自带 .venv，放行
+    elif printf '%s' "$cmd" | grep -qE '(^|[/[:space:]])wt[[:space:]]+run([[:space:]]|$)'; then
+      : # (b) wt run 已锚定 cwd，放行
+    elif printf '%s' "$cmd" | grep -qE '(^|[[:space:];&|(])(cd|pushd)[[:space:]]'; then
+      : # (c) 同条命令里已 cd / pushd，放行 —— 拦它会把模型逼进死胡同
     else
       suggest="cwd 会漂回裸 home（/Users/colar），相对 .venv/bin/ 必 exit 127（全库复现最多的一类坑）。用绝对路径，或同条命令里先 cd \$(git rev-parse --show-toplevel)"
     fi
   fi
 fi
 
-# ---- 规则 5：管道后判退出码 ----
+# ---- 规则 5：管道末段是展示型过滤器，紧接着就判 $? ----
 # zsh 里 $? 是管道最后一段的码，前段失败被静默吞掉。实证 09-09 → 09-11 连续三天。
+# 2026-11 审计：旧判据「整条命令有任意 | 且有任意 $?」30 天拦 1419 次、精度约 11%（真正 $? 紧跟管道只占 14.5%），
+# 与本头注「任何不确定一律放行」矛盾，所以收窄到下面的形状。
+# 拦（全部满足）：live 的 $?（不在单引号 / heredoc 正文 / bash -c '…' 里；双引号里的 "rc=$?" 算 live）·
+#     含它的那条命令紧邻前一条是真管道（| 或 |&）的末段 · 该末段命令词属 tail head cut tee sed tr wc sort cat。
+# 放行：$? 在管道之前（echo exit $? | tee log）· $? 跟在非管道命令后（cmd; echo $?）· 末段是 grep xargs diff python 等
+#     （要首段还是末段的状态是意图问题，判不了）· 命令里有小写 pipestatus（含 ${pipestatus[1]:-$?}）或 set -o pipefail /
+#     setopt pipefail。大写 PIPESTATUS 不豁免：zsh 里它是空的，${PIPESTATUS[0]:-$?} 会静默退回末段码。
+# 判定在同目录 pipe_status_check.py（要认引号 / heredoc / 管道邻接，bash 正则写不清；与规则 8 / 9 共用 shell_segments.py 切词）；
+# 判定器缺失或异常一律放行。预过滤：整条命令没有 | 或没有 $? 就不起 python。
 if [ -z "$suggest" ]; then
-  if printf '%s' "$cmd" | grep -q '|' && printf '%s' "$cmd" | grep -qE '\$\?'; then
-    suggest="管道里 \$? 取的是最后一段的退出码，前段失败被静默吞掉（实证连踩三天）。用 \${pipestatus[1]}（zsh）或让被判断的命令不进管道"
-  fi
+  case "$cmd" in
+    *'|'*)
+      case "$cmd" in
+        *'$?'*)
+          pipe_checker="$(dirname "${BASH_SOURCE[0]}")/pipe_status_check.py"
+          if [ -f "$pipe_checker" ]; then
+            pipe_hit=$(printf '%s' "$cmd" | python3 "$pipe_checker" 2>/dev/null | head -n 1 || true)
+            if [ -n "$pipe_hit" ]; then
+              suggest="管道末段 ${pipe_hit}（只做展示）之后的 \$? 是 ${pipe_hit} 的退出码，前段失败被静默吞掉。最小改法（顶层 zsh）：cmd 2>&1 | tail -5; echo \"rc=\${pipestatus[1]}\"；要兼容 bash -c 就别进管道：cmd > <scratchpad 绝对路径>/x.log 2>&1; rc=\$?; tail -n 20 <scratchpad 绝对路径>/x.log。要的是首段状态就用 \${pipestatus[1]}"
+            fi
+          fi ;;
+      esac ;;
+  esac
 fi
 
 # ---- 规则 6：zsh 不对裸 $VAR 分词 ----
