@@ -20,7 +20,7 @@ fi
 
 COMMON_DIR="$(git -C "$(dirname "$0")" rev-parse --path-format=absolute --git-common-dir)"
 SCRIPT="$(dirname "$COMMON_DIR")/scripts/disk_cleanup.sh"
-[ -f "$SCRIPT" ] || { echo "主工作树里没有 $SCRIPT（改动还没合进主树？）" >&2; exit 1; }
+[ -f "$SCRIPT" ] || { echo "主工作树里没有 ${SCRIPT}（改动还没合进主树？）" >&2; exit 1; }
 
 mkdir -p "$(dirname "$PLIST")" "$HOME/Library/Logs"
 cat > "$PLIST" <<PLIST
@@ -45,4 +45,4 @@ PLIST
 plutil -lint "$PLIST" >/dev/null
 launchctl bootout "$DOMAIN" "$PLIST" 2>/dev/null || true
 launchctl bootstrap "$DOMAIN" "$PLIST"
-echo "已安装 $LABEL → $SCRIPT（每天 04:30；日志 ~/Library/Logs/colar-disk-cleanup.log）"
+echo "已安装 $LABEL → ${SCRIPT}（每天 04:30；日志 ~/Library/Logs/colar-disk-cleanup.log）"
