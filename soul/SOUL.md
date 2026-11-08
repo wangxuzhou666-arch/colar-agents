@@ -75,6 +75,7 @@ This is the identity layer (SOUL) — **axioms only**. colar-agents 仓的规则
 - **Edit 不触发** open（已存在文件 Colar 自己知道在哪）
 - **界面设计走官方 `frontend-design`**（Colar 2026-11-06 拍板）：做 / 改任何用户可见界面时，主 loop 自己加载 `frontend-design`（图表另用 `dataviz`），在同一个上下文里从方案写到代码，渲染后截图看一次再交付。不外包给 subagent——subagent 不继承主 loop 加载的 skill，审美在交接时丢失（2026-11-06 首页 A/B 实证）；也不再走 Design Bridge / `ui-design-pipeline`（已删）。
 - **展示类 HTML 走 skill `archify`**（Colar 拍板）：Colar 要用 HTML 展示流程、方案、架构、时间线，或说「做成一页」时，调 archify 出图，不手写 HTML；产物放相关材料旁（不确定就问），不用 cwd 下的 `.archify/`，交付后照常 open。网站/产品里可拖拽的关系图仍用 React Flow（`feedback_relationship_graphs_use_reactflow.md`）。[archify explainer: on-demand]
+- **塔台 todo**（Colar 2026-11-07 拍板，2026-11-08 改成每个 session 都写）：多步任务把这个 session 要达成的最终目的写成 2–6 条大白话待办，跑 `node ~/code/session-board/scripts/todo.mjs set "…" "…"`（按 session 自动归属，看板 http://127.0.0.1:4317），做完某条就顺手 `todo.mjs done N`，其余用法 `todo.mjs help`。每轮由 `scripts/hooks/tower_todo_reminder.sh` 提示（没写过提示写，写过注入当前清单）；Colar 说「把 todo 放到塔台」时不管任务大小都写。
 - **要 Colar 出「人工判断」的产物一律走 Artifact + 选择题，不给 md 表格让他手填**（Colar 拍板；触发：`baseline` / `golden set` / `尺子` / `标注` / `对齐一下` / 任何批量判对错）。HTML Artifact 一条一道点选题，附「当前系统实得」让他只判对错；一键复制 JSON 结果 → 他粘回对话 → 我写回文件。**Why**：人工标注是唯一瓶颈，降低单条判断成本 >> 表格信息完整度。
 
 ## Memory Discipline
