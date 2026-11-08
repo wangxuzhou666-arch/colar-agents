@@ -15,7 +15,7 @@
 #
 # 自证测试：bash scripts/hooks/tests/test_bash_pitfall_guard.sh —— 每条规则都有正例（必 deny）
 # 与反例（必放行，含各规则明写的放行例外）。改任何规则先跑它；新规则不带正反用例不许进。
-# 已知限制：heredoc 正文也在被扫的命令串里（规则 5 / 8 / 9 除外，它们的判定器会跳过 heredoc 正文），
+# 已知限制：heredoc 正文也在被扫的命令串里（规则 5 / 8 / 9 / 10 除外，它们的判定器会跳过 heredoc 正文），
 #           往文件里写含这些形状的内容请用 Write/Edit 工具。
 
 input=$(cat 2>/dev/null || true)
@@ -178,6 +178,31 @@ if [ -z "$suggest" ]; then
           esac
         fi
       fi ;;
+  esac
+fi
+
+# ---- 规则 10：没走全机重任务槽的多 worker pytest ----
+# 实证 2026-11-07 21:52：两个会话各跑一套全量测试（-n auto 8 worker + 覆盖率 / -n 6）+ 刚重启的 Docker 虚拟机，
+# 把 16G 内存和 swap 压满，机器卡死被强制重启；19:58 同类并发还把磁盘写满。每个会话只看自己，没有全机统管点。
+# 准入判据的例外同规则 8：后果是整机强制重启、所有会话的进行中工作一起丢，踩一次就够（Colar 2026-11-08 拍板）。
+# 拦：pytest / python -m pytest 带 -n ≥2 / auto / logical（含 uv / poetry / pipenv / wt run 包装）。
+# 不拦：-n 0 / 1、单进程 pytest（带 --cov 也不拦：内存乘数是 worker 数）、已经 heavy_slot.py run … -- 包着的、
+#     只是提到。各仓接了槽的入口脚本（织锦 clean_check_all / check_all / coverage_snapshot）内部排队，不在这里拦。
+# 不设 ALLOW 前缀：放行路径就是走槽，槽在本仓、总可用；只跑少数文件就去掉 -n。
+# 判定在同目录 heavy_task_check.py（与规则 8 / 9 共用 shell_segments.py 切词）；判定器缺失或异常一律放行。
+if [ -z "$suggest" ]; then
+  case "$cmd" in
+    *pytest*)
+      case "$cmd" in
+        *-n*)
+          heavy_checker="$(dirname "${BASH_SOURCE[0]}")/heavy_task_check.py"
+          if [ -f "$heavy_checker" ]; then
+            heavy_hit=$(printf '%s' "$cmd" | python3 "$heavy_checker" 2>/dev/null | head -n 1 || true)
+            if [ -n "$heavy_hit" ]; then
+              suggest="命中 ${heavy_hit}：多 worker 的测试要走全机重任务槽，同一时刻全机只跑一套（2026-11-07 两套 -n 全量测试 + Docker 把 16G 内存和 swap 压满，机器卡死被强制重启）。改成：python3 \$HOME/Desktop/colar-agents/scripts/heavy_slot.py run --priority gate --label <线名> -- <原命令>（排队时会播报在等谁；部署门用 --priority deploy）。只跑少数几个测试文件就去掉 -n。看谁在占槽：python3 \$HOME/Desktop/colar-agents/scripts/heavy_slot.py status"
+            fi
+          fi ;;
+      esac ;;
   esac
 fi
 

@@ -41,7 +41,7 @@
 #                              并且内容全在本仓对象库里（不丢东西）；_ 开头 / 无 .git 文件 / 别仓的一律跳过并列出。
 #                              登记着的树（含常驻线级树）gc 从不碰
 #
-# Exit: 0 成功；1 用法/前置错误（含 fetch、ls-remote 失败）；2 拒绝执行（上面各道门：脏树 / symlink 指进 / 同名目录 / 分支已存在 / 游离提交 / 有进程在用 / 不可再生的被忽略文件 / 未合入 / git 拒绝拆）
+# Exit: 0 成功；1 用法/前置错误（含 fetch、ls-remote 失败）；2 拒绝执行（上面各道门 + new 的磁盘水位门：脏树 / symlink 指进 / 同名目录 / 分支已存在 / 游离提交 / 有进程在用 / 不可再生的被忽略文件 / 未合入 / git 拒绝拆）
 #
 # 背景（2026-08-18 全量扫 5297 session、288 次 git worktree 调用得出的六类坑）：
 #  1. cwd 悬空：cd 进 worktree 后把它删了，shell 卡在不存在的目录，后续命令全 ENOENT（6 次）。
@@ -71,6 +71,20 @@ REGEN_FILE_GLOBS=('*.pyc' '.DS_Store' '*.tsbuildinfo')
 
 die()  { printf '%s\n' "$*" >&2; exit 1; }
 deny() { printf '%s\n' "$*" >&2; exit 2; }
+
+# 磁盘水位门（2026-11-08，Colar 拍板）：WT_HOME 所在卷剩余 < WT_MIN_DISK_GB（默认 20）就拒绝建树。
+# 2026-11-07 19:58 实证：两个会话同时建验证树（各约 2.5G，含一份种子库）+ 跑测试，把只剩约 4G 的盘写满，部署门上千条
+# 测试写不了临时文件报假红，Docker 引擎写日志失败崩掉。swap 与数据卷共用同一个 APFS 容器，内存吃紧时 swap 也在涨，
+# 所以水位要留余量，不能等到真满。门槛与全机重任务槽（scripts/heavy_slot.py 的 HEAVY_MIN_DISK_GB）一致。
+check_disk_headroom() {
+    local min_gb="${WT_MIN_DISK_GB:-20}" free_kb
+    free_kb=$(df -Pk "$WT_HOME" | awk 'NR==2 {print $4}')
+    case "$free_kb" in ''|*[!0-9]*) return 0 ;; esac   # 读不出就不拦（宁漏勿误）
+    if [ $((free_kb / 1048576)) -lt "$min_gb" ]; then
+        deny "wt: 拒绝 —— 磁盘只剩 $((free_kb / 1048576))G（低于 ${min_gb}G），新树（含种子库约 2.5G）加上测试临时文件会把盘写满。
+wt: 先腾空间：bash \$HOME/Desktop/colar-agents/scripts/disk_cleanup.sh --dry-run 看看能清什么；不用的树 wt rm / wt park；du -sh ~/.wt/* ~/artifacts/* | sort -h | tail"
+    fi
+}
 
 # 主工作树根：--git-common-dir 在主仓返回 .git、在 worktree 返回主仓的 .git，两种情形都能推回主仓。
 main_root() {
@@ -186,6 +200,7 @@ cmd_new() {
     local root path
     root=$(main_root) || exit 1
     mkdir -p "$WT_HOME"          # 必须先建：否则 canon 算不出父目录 realpath（首次使用踩过）
+    check_disk_headroom
     path=$(wt_path_of "$purpose")
     [ -z "$branch" ] || check_new_branch "$root" "$branch" "$ref"
 

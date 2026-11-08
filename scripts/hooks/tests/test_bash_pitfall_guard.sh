@@ -332,5 +332,26 @@ expect_allow "R9 scope -f <文件> 不带值是读"   "git config -f /Users/cola
 expect_allow "R9 scope --global --list | grep 是读" "git config --global --list | grep -i hookspath"
 expect_allow "R9 scope get --global（git 2.46+）是读" "git config get --global core.hooksPath"
 
+# ---- 规则 10：没走全机重任务槽的多 worker pytest ----
+# 变异清单：删掉 heavy_slot.py 放行 → 「已走槽」反例转红；SERIAL 清空 → 「-n 1」反例转红；
+# 不认 python -m pytest → 对应正例转红；RUNNERS 去掉 wt → 「wt run」正例转红。
+expect_deny  "R10 pytest -n auto"               "pytest -n auto api/tests"                                   "命中 pytest -n auto"
+expect_deny  "R10 .venv python -m pytest -n 6"  "/Users/colar/x/.venv/bin/python -m pytest -n 6 api/tests experiments scripts" "命中 pytest -n 6"
+expect_deny  "R10 -nauto 紧贴写"                "cd /Users/colar/x && pytest -nauto --cov=src"              "命中 pytest -n auto"
+expect_deny  "R10 --numprocesses=logical"       "python3 -m pytest --numprocesses=logical"                  "命中 pytest -n logical"
+expect_deny  "R10 赋值前缀 + && 之后"           "cd /Users/colar/x && PYTHON_DOTENV_DISABLED=1 .venv/bin/pytest -n 4 -q" "命中 pytest -n 4"
+expect_deny  "R10 wt run 包着"                  "wt run fab-line .venv/bin/python -m pytest -n auto api/tests" "命中 pytest -n auto"
+expect_deny  "R10 uv run 包着"                  "uv run pytest -n 8"                                        "命中 pytest -n 8"
+expect_deny  "R10 bash -c 包着"                 "bash -c 'pytest -n auto tests'"                             "命中 pytest -n auto"
+expect_allow "R10 已走槽"                       "python3 /Users/colar/Desktop/colar-agents/scripts/heavy_slot.py run --priority gate --label x -- pytest -n auto api/tests"
+expect_allow "R10 已走槽（.venv python 起槽）"  "/Users/colar/x/.venv/bin/python /Users/colar/Desktop/colar-agents/scripts/heavy_slot.py run -- /Users/colar/x/.venv/bin/python -m pytest -n 6"
+expect_allow "R10 -n 1 是串行"                  "pytest -n 1 api/tests/test_x.py"
+expect_allow "R10 -n 0 是串行"                  "python -m pytest -n 0 -q"
+expect_allow "R10 单进程 + --cov 不拦"          "pytest --cov=src api/tests/test_x.py"
+expect_allow "R10 --help"                       "pytest -n auto --help"
+expect_allow "R10 grep 参数里提到"              "grep -rn \"pytest -n auto\" /Users/colar/x/scripts"
+expect_allow "R10 heredoc 正文里提到"           $'cat > /Users/colar/x/NOTES.md <<\'EOF\'\n别直接跑 pytest -n auto\nEOF\necho done'
+expect_allow "R10 别的命令的 -n"                "git log -n 5 && pytest api/tests/test_x.py"
+
 echo "PASS $pass / FAIL $fail"
 [ "$fail" -eq 0 ]
